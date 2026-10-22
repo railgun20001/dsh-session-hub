@@ -140,7 +140,9 @@ function createSessionHubRail(React, deps, variant = 'header') {
             } catch (error) {
               console.warn('[dsh-session-hub] 确认报错失败', error)
             }
-            deps.openSession(row.id)
+            // 点击 chip 时窗口本来就在前台：只做应用内跳转，不请求窗口前置，
+            // 避免触发 Win32 的窗口状态处理（最大化被 SW_RESTORE 打回普通尺寸）。
+            deps.openSession(row.id, { raise: false })
           },
         },
         h('span', { className: 'dsh-hub__dot', 'aria-hidden': 'true' }),

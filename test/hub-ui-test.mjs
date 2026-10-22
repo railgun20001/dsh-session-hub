@@ -132,7 +132,7 @@ test('点击 chip：先确认该条目的报错 seq，再打开会话', () => {
   const opened = []
   const acked = []
   const Rail = loadFactory()(reactStub(), {
-    openSession: (id) => opened.push(id),
+    openSession: (id, options) => opened.push([id, options]),
     ackError: (id, seq) => acked.push([id, seq]),
     acks: { subscribe: () => () => {}, getSnapshot: () => ({}) },
   })
@@ -151,7 +151,7 @@ test('点击 chip：先确认该条目的报错 seq，再打开会话', () => {
   assert.ok(chip !== undefined, '应当渲染报错 chip')
   chip.props.onClick()
   assert.deepEqual(acked, [['s1', 7]])
-  assert.deepEqual(opened, ['s1'])
+  assert.deepEqual(opened, [['s1', { raise: false }]])
 })
 
 test('已确认的报错不再渲染 chip', () => {

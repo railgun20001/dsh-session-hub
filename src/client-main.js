@@ -270,9 +270,14 @@ function apply(ctx) {
    *   1. 在应用内跳转到该会话（受支持通道，必然生效）；
    *   2. 请求宿主半把桌面窗口提到前台（渲染进程自己做不到）；
    *   3. `window.focus()` 兜底（受 Blink 手势门控，可能无效，但零成本）。
+   *
+   * `options.raise === false` 时跳过第 2 步：**点击状态栏 chip 时窗口本来就在前台**，
+   * 再走一次窗口前置毫无收益，反而会经过 Win32 的窗口状态处理（历史实现里的
+   * SW_RESTORE 会把最大化窗口打回普通尺寸）。chip 点击只做应用内跳转。
    * @param {string} sessionId 目标会话。
+   * @param {{ raise?: boolean }} [options] `raise:false` 表示不请求宿主半前置窗口。
    */
-  const openSession = (sessionId) => {
+  const openSession = (sessionId, options = {}) => {
     if (typeof sessionId !== 'string' || sessionId === '') return
     const workspace = safeGet('uiWorkspace')
     if (workspace !== undefined && typeof workspace.openSession === 'function') {
@@ -291,7 +296,7 @@ function apply(ctx) {
         /* 事件广播失败不影响通知本身 */
       }
     }
-    callHostRoute('raise')
+    if (options.raise !== false) callHostRoute('raise')
     focusWindowBestEffort()
   }
 
@@ -379,7 +384,8 @@ function apply(ctx) {
       } catch {
         /* 关闭失败无所谓，下面照常跳转 */
       }
-      openSession(notification.sessionId)
+      // 窗口已经在前台时不需要再前置（也就不会触碰窗口状态）；后台/最小化时才请求。
+      openSession(notification.sessionId, { raise: !isFocused(config) })
     }
     toast.onclose = () => {}
     toast.onerror = () => {

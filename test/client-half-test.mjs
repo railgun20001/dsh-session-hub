@@ -299,6 +299,8 @@ test('新一轮完成弹「任务完成」，点通知跳回会话并把窗口�
     assert.equal(toast.options.requireInteraction, false)
     assert.equal(toast.options.silent, false)
 
+    // 真实场景里点 toast 时窗口通常不在前台；这里显式模拟未聚焦。
+    globalThis.document.hasFocus = () => false
     toast.onclick()
     assert.equal(toast.closed, true)
     assert.equal(harness.state.focusCalls, 1)
@@ -734,6 +736,27 @@ test('诊断入口可以弹测试通知，并能主动探活宿主半', async ()
     assert.equal(api.testNotification(), true)
     assert.equal(harness.state.notifications.length, 1)
     assert.equal(harness.state.notifications[0].title, 'DSH · 通知测试')
+  } finally {
+    harness.dispose()
+    harness.restore()
+  }
+})
+
+test('窗口已聚焦时点通知不再重复请求前置窗口（不会触碰最大化状态）', async () => {
+  const harness = await createHarness({
+    sessions: [sessionRow('s1')],
+    projections: { s1: turnEnd(10, 'completed') },
+  })
+  try {
+    await settle()
+    harness.setProjection('s1', turnEnd(12, 'completed'))
+    await settle()
+    assert.equal(harness.state.notifications.length, 1)
+    harness.state.notifications[0].onclick()
+    assert.deepEqual(
+      harness.state.fetches.map((call) => call.url),
+      ['dsh-session-hub/warmup'],
+    )
   } finally {
     harness.dispose()
     harness.restore()

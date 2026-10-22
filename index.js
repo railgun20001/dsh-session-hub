@@ -58,7 +58,7 @@
  * @module dsh-session-hub
  */
 
-import { createWindowRaiser, resolveTargetProcessId, isOverlayState } from './lib/raise-window.js'
+import { createWindowRaiser, resolveTargetProcessId, isOverlayState, WORKER_PROTOCOL } from './lib/raise-window.js'
 import { readFileSync } from 'node:fs'
 
 /**
@@ -159,6 +159,7 @@ export function createRouteHandler(raiser, diagnostics) {
         projectionKey: PROJECTION_KEY,
         raiserRunning: raiser.isRunning?.() === true,
         overlayState: raiser.overlayState?.() ?? 'none',
+        workerProtocol: WORKER_PROTOCOL,
       })
       return
     }
@@ -431,6 +432,7 @@ export function apply(ctx) {
       rows,
       raiserRunning: raiser.isRunning?.() === true,
       overlayState: raiser.overlayState?.() ?? 'none',
+      workerProtocol: WORKER_PROTOCOL,
     }
   }
 

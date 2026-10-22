@@ -11,6 +11,7 @@ import {
   DEFAULT_IDLE_SHUTDOWN_MS,
   OVERLAY_STATES,
   WORKER_SCRIPT,
+  WORKER_PROTOCOL,
   createWindowRaiser,
   isOverlayState,
   resolveTargetProcessId,
@@ -216,4 +217,16 @@ test('resolveTargetProcessId 用宿主进程的父进程（桌面端就是窗口
   assert.equal(resolveTargetProcessId({}), undefined)
   assert.equal(resolveTargetProcessId({ ppid: '33032' }), undefined)
   assert.equal(resolveTargetProcessId(null), undefined)
+})
+
+test('Raise 只在最小化时 SW_RESTORE，最大化保持最大化（防止点击对话取消最大化）', () => {
+  assert.equal(WORKER_PROTOCOL, 2)
+  assert.match(WORKER_SCRIPT, /IsIconic/)
+  assert.match(WORKER_SCRIPT, /IsZoomed/)
+  const iconic = WORKER_SCRIPT.indexOf('if (IsIconic(target)) ShowWindow(target, 9)')
+  const zoomed = WORKER_SCRIPT.indexOf('else if (IsZoomed(target)) ShowWindow(target, 3)')
+  assert.ok(iconic !== -1 && zoomed !== -1, '应当按窗口状态分支')
+  assert.ok(iconic < zoomed, '先判断最小化，再判断最大化')
+  // 旧实现是无条件 SW_RESTORE；它会把最大化窗口打回普通尺寸。
+  assert.equal(/AttachThreadInput\(thisThread, foreThread, true\);\s*ShowWindow\(target, 9\)/.test(WORKER_SCRIPT), false)
 })

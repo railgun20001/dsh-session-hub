@@ -48,8 +48,11 @@
 - 全部空闲时显示一个低调的「全部空闲」；没有可用会话（或插槽钩子缺失）时也不会报错；
 - 视觉只用 `--dsw-alias-*` / 设计系统 token，浅色/深色主题都跟随宿主。
 
-点击 chip 的行为：确认该条目的报错 → `uiWorkspace.openSession(sessionId)` →
-请求宿主半前置窗口 → `window.focus()` 兜底。
+点击 chip 的行为：确认该条目的报错 → `uiWorkspace.openSession(sessionId)`。
+**chip 点击不请求窗口前置**：窗口本来就在前台，而且这样可以完全避免触碰窗口状态——
+旧实现无条件调用 `SW_RESTORE`，会把最大化的 DSH 窗口打回普通尺寸，这就是「点一下对话
+最大化被取消」的根因。通知点击也只在窗口确实不在前台时才请求前置；宿主半现在按
+`IsIconic` / `IsZoomed` 分支，最小化才 `SW_RESTORE`，最大化用 `SW_SHOWMAXIMIZED` 保持。
 
 ---
 
@@ -227,6 +230,9 @@ Invoke-RestMethod -Uri http://127.0.0.1:14489/dsh-session-hub/debug -Method POST
 
 ## 9. 已知边界
 
+- **宿主半的窗口状态修复需要重启一次 DSH**：`lib/raise-window.js` 的 worker 脚本在宿主
+  启动时加载，旧进程里仍是旧协议。`POST /dsh-session-hub/ping` 返回的 `workerProtocol`
+  为 `2` 才表示运行中的 worker 已保留最大化；客户端 chip 点击的修复不需要重启，刷新页面即可。
 - **窗口前置依赖 Windows 前台锁**：`AttachThreadInput` 组合在本机实测有效，但全屏应用、
   UAC 提权窗口、远程桌面切换等极端场景仍可能拒绝；此时应用内跳转照常发生。
 - **第一次点通知可能略慢**：worker 需要先编译一次 C#（本机实测 5.9–9.6 秒，取决于杀软）。
