@@ -174,3 +174,21 @@ test('已确认的报错不再渲染 chip', () => {
     && node.props.className.includes('dsh-hub__chip')), undefined)
   assert.match(collectText(tree).join('|'), /全部空闲/)
 })
+
+test('chrome 变体带 fixed 顶栏类与菜单偏移 CSS', () => {
+  const factory = loadFactory()
+  const Rail = factory(reactStub(), {
+    openSession: () => {},
+    ackError: () => {},
+    acks: { subscribe: () => () => {}, getSnapshot: () => ({}) },
+  }, 'chrome')
+  const list = { byId: { s1: row('s1', { running: true }) }, projectionsBySession: {} }
+  const tree = Rail({
+    useSessions: (selector) => selector(list),
+    useSessionStatus: (selector) => selector(new Map()),
+  })
+  assert.match(tree.props.className, /dsh-hub--chrome/)
+  const style = tree.children[0]
+  assert.match(style.children[0], /position:fixed/)
+  assert.match(style.children[0], /--dsh-windows-menu-start/)
+})

@@ -32,15 +32,21 @@
 
 ## 2. 界面位置
 
-状态栏注册在官方插槽 **`conversation.header.leading`**（`replaceRisk: none`）：
-它在会话标题之前、工作区内容之上，并且在「没有选中会话」时也会渲染。
+**桌面端**：状态栏注册在官方 `shell.overlay` 浮动层（`replaceRisk: none`），
+固定在软件顶端标题栏、**「应用 / 编辑」菜单之后**、窗口控件之前，随顶栏高度（40px）
+垂直居中；菜单被侧栏收起改变位置时，用 `--dsh-windows-menu-start` 自动跟随。
+该层本身点击穿透，状态栏条目自己恢复 `pointer-events` 并标记 `-webkit-app-region: no-drag`，
+所以 chip 可点、标题栏其余空白仍可拖动窗口。
+
+**Web / 非 Windows 顶栏环境**：同一组件回落到官方
+`conversation.header.leading`（`replaceRisk: none`），位于会话标题之前、工作区内容之上。
 
 - 每条是一个圆角 chip：状态点 + 会话标题 + 状态短标签；标题过长省略，悬停显示完整标题；
 - 默认只显示优先级最高的 3 条；还有更多时显示 `+N`，点一下展开全部，再点「收起」恢复，
   既不挤压标题，也不会把第 4 条截成半截；
 - chip 横向排列，超出宽度可横向滚动（隐藏滚动条），不挤压标题；
 - 全部空闲时显示一个低调的「全部空闲」；没有可用会话（或插槽钩子缺失）时也不会报错；
-- 视觉只用 `--dsw-alias-*` 主题令牌，浅色/深色主题都跟随宿主。
+- 视觉只用 `--dsw-alias-*` / 设计系统 token，浅色/深色主题都跟随宿主。
 
 点击 chip 的行为：确认该条目的报错 → `uiWorkspace.openSession(sessionId)` →
 请求宿主半前置窗口 → `window.focus()` 兜底。

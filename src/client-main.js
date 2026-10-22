@@ -604,12 +604,20 @@ function apply(ctx) {
             console.warn(`[${PLUGIN_ID}] 拿不到 React，状态栏不渲染（通知与任务栏不受影响）`)
             return
           }
-          const Rail = createSessionHubRail(React, { openSession, ackError, acks })
+          const RailHeader = createSessionHubRail(React, { openSession, ackError, acks }, 'header')
+          const RailChrome = createSessionHubRail(React, { openSession, ackError, acks }, 'chrome')
           scoped.slots.inject('conversation.header.leading', () => scoped.slots.register({
             name: 'conversation.header.leading',
             locale: PLUGIN_ID,
-          }, Rail))
-          ctx.logger?.info?.(`[${PLUGIN_ID}] 状态栏已注册到 conversation.header.leading`)
+          }, RailHeader))
+          // Windows 顶栏：菜单后、窗口控件前的 frame-wide 浮动层；Web 端由 CSS 隐藏。
+          scoped.slots.inject('shell.overlay', () => scoped.slots.register({
+            name: 'shell.overlay',
+            id: 'session-hub-chrome',
+            order: 5,
+            locale: PLUGIN_ID,
+          }, RailChrome))
+          ctx.logger?.info?.(`[${PLUGIN_ID}] 状态栏已注册到 conversation.header.leading + shell.overlay`)
         } catch (error) {
           console.warn(`[${PLUGIN_ID}] 注册状态栏失败`, error)
         }
