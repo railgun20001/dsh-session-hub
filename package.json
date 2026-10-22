@@ -1,0 +1,55 @@
+{
+  "name": "dsh-session-hub",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DSH 会话状态中心：工作区顶部汇总运行中 / 待回答 / 待查看 / 报错会话，状态变化弹 Windows 通知，并用红黄绿点标记任务栏图标",
+  "main": "index.js",
+  "exports": {
+    ".": {
+      "default": "./index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "lib/client.js",
+    "lib/raise-window.js",
+    "build/bundle.mjs",
+    "src",
+    "test",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node build/bundle.mjs",
+    "test": "node --test test/hub-model-test.mjs test/hub-ui-test.mjs test/projection-test.mjs test/client-half-test.mjs test/raise-window-test.mjs",
+    "check": "node build/bundle.mjs --check && node --test test/hub-model-test.mjs test/hub-ui-test.mjs test/projection-test.mjs test/client-half-test.mjs test/raise-window-test.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-client-ui-session",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    },
+    "manifestVersion": 1
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

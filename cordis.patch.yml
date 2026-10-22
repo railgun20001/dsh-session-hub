@@ -1,0 +1,11 @@
+# dsh-session-hub —— bundle patch
+#
+# 一行同时挂起两半：
+#   - 宿主半（index.js）：注册 hubTurnOutcome 会话投影 + 窗口前置 / 任务栏状态点路由；
+#   - 客户端半（lib/client.js）：工作区顶部会话状态栏 + Windows 通知 + 任务栏状态上报。
+#
+# 客户端半的模块图顺序由 package.json 的 dsh.client.inject 声明（那里写包名），
+# 这里不需要重复。
+- insert:
+    - id: session-hub
+      name: dsh-session-hub
