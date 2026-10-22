@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "DSH 会话状态中心：工作区顶部汇总运行中 / 待回答 / 待查看 / 报错会话，状态变化弹 Windows 通知，并用红黄绿点标记任务栏图标",
+  "description": "DSH 会话状态中心：软件顶端标题栏汇总运行中 / 待回答 / 待查看 / 报错会话，状态变化弹 Windows 通知，并用红黄绿点标记任务栏图标",
   "main": "index.js",
   "exports": {
     ".": {
