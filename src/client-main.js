@@ -573,9 +573,11 @@ function apply(ctx) {
           try {
             scoped.effect(() => scoped.locale.register(PLUGIN_ID, {
               zh: {
-                label: '会话状态',
+                label: '会话',
                 idle: '全部空闲',
                 aria: '会话状态：{count} 个需要关注',
+                more: '还有 {count} 个会话',
+                collapse: '收起',
                 'state.answer': '等待回答',
                 'state.error': '报错',
                 'state.running': '运行中',
@@ -585,6 +587,8 @@ function apply(ctx) {
                 label: 'Sessions',
                 idle: 'All idle',
                 aria: 'Session status: {count} need attention',
+                more: '{count} more Sessions',
+                collapse: 'Collapse',
                 'state.answer': 'Waiting',
                 'state.error': 'Failed',
                 'state.running': 'Running',

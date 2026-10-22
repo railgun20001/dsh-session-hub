@@ -115,7 +115,7 @@ test('四类状态渲染成 chip，空状态渲染「全部空闲」', () => {
     useSessionStatus: (selector) => selector(statuses),
   })
   const text = collectText(tree).join('|')
-  assert.match(text, /会话状态/)
+  assert.match(text, /会话/)
   assert.match(text, /等待回答/)
   assert.match(text, /报错/)
   assert.match(text, /待查看/)

@@ -37,9 +37,11 @@ function createSessionHubRail(React, deps) {
 
   /** 文案回落：插槽没有绑定 locale 时也能显示中文。 */
   const FALLBACK = {
-    label: '会话状态',
+    label: '会话',
     idle: '全部空闲',
     aria: '会话状态：{count} 个需要关注',
+    more: '还有 {count} 个会话',
+    collapse: '收起',
     'state.answer': '等待回答',
     'state.error': '报错',
     'state.running': '运行中',
@@ -76,20 +78,23 @@ function createSessionHubRail(React, deps) {
   }
 
   const CSS = [
-    '.dsh-hub{display:flex;align-items:center;gap:6px;min-width:0;max-width:min(48vw,720px);overflow-x:auto;overflow-y:hidden;padding:2px 0;scrollbar-width:none;font:inherit}',
+    '.dsh-hub{display:flex;align-items:center;gap:6px;min-width:0;max-width:min(46vw,700px);overflow-x:auto;overflow-y:hidden;padding:2px 4px 2px 0;scrollbar-width:none;font:inherit}',
     '.dsh-hub::-webkit-scrollbar{display:none}',
     '.dsh-hub__label{flex:none;font-size:11px;line-height:1;color:var(--dsw-alias-label-secondary);letter-spacing:.04em;margin-right:2px;user-select:none;white-space:nowrap}',
     '.dsh-hub__idle{flex:none;display:inline-flex;align-items:center;height:26px;padding:0 9px;border:1px solid var(--dsw-alias-border-l1);border-radius:999px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1;white-space:nowrap}',
-    '.dsh-hub__chip{flex:none;display:inline-flex;align-items:center;gap:6px;max-width:240px;height:26px;padding:0 9px;border:1px solid var(--dsw-alias-border-l1);border-radius:999px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;line-height:1;cursor:pointer;transition:background .12s ease,border-color .12s ease}',
+    '.dsh-hub__chip{flex:none;display:inline-flex;align-items:center;gap:6px;max-width:190px;height:26px;padding:0 9px;border:1px solid var(--dsw-alias-border-l1);border-radius:999px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;line-height:1;cursor:pointer;transition:background .12s ease,border-color .12s ease}',
     '.dsh-hub__chip:hover{background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-border-l2)}',
     '.dsh-hub__chip:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
     '.dsh-hub__dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--dsw-alias-state-idle-primary)}',
     '.dsh-hub__chip--answer .dsh-hub__dot{background:var(--dsw-alias-state-warn-primary)}',
     '.dsh-hub__chip--error .dsh-hub__dot{background:var(--dsw-alias-state-error-primary)}',
-    '.dsh-hub__chip--running .dsh-hub__dot{background:var(--dsw-alias-brand-primary);animation:dsh-hub-pulse 1.4s ease-in-out infinite}',
+    '.dsh-hub__chip--running .dsh-hub__dot{background:var(--dsw-static-blue-400,#60a5fa);animation:dsh-hub-pulse 1.4s ease-in-out infinite}',
     '.dsh-hub__chip--unread .dsh-hub__dot{background:var(--dsw-alias-state-success-primary)}',
     '.dsh-hub__title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
     '.dsh-hub__state{flex:none;font-size:10px;line-height:1;color:var(--dsw-alias-label-secondary)}',
+    '.dsh-hub__more{flex:none;display:inline-flex;align-items:center;height:26px;padding:0 9px;border:1px dashed var(--dsw-alias-border-l2);border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11px;line-height:1;cursor:pointer;white-space:nowrap}',
+    '.dsh-hub__more:hover{background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary)}',
+    '.dsh-hub__more:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
     '@keyframes dsh-hub-pulse{0%,100%{opacity:1}50%{opacity:.35}}',
     '@media (prefers-reduced-motion:reduce){.dsh-hub__chip--running .dsh-hub__dot{animation:none}}',
   ].join('')
@@ -102,13 +107,16 @@ function createSessionHubRail(React, deps) {
     const statuses = useSessionStatus((value) => value)
     const ackErrors = useAcks(deps.acks)
     const rows = deriveHubRows({ list, statuses, ackErrors, now: Date.now() })
+    const [expanded, setExpanded] = React.useState(false)
+    const visibleRows = expanded ? rows : rows.slice(0, 3)
+    const hiddenCount = rows.length - visibleRows.length
 
     const children = [h('style', { key: 'style' }, CSS)]
     children.push(h('span', { key: 'label', className: 'dsh-hub__label' }, t('label')))
     if (rows.length === 0) {
       children.push(h('span', { key: 'idle', className: 'dsh-hub__idle' }, t('idle')))
     } else {
-      for (const row of rows) {
+      for (const row of visibleRows) {
         const stateLabel = t(`state.${row.state}`)
         children.push(h('button', {
           key: row.id,
@@ -128,6 +136,23 @@ function createSessionHubRail(React, deps) {
         h('span', { className: 'dsh-hub__dot', 'aria-hidden': 'true' }),
         h('span', { className: 'dsh-hub__title' }, row.title),
         h('span', { className: 'dsh-hub__state' }, stateLabel)))
+      }
+      if (hiddenCount > 0) {
+        children.push(h('button', {
+          key: 'more',
+          type: 'button',
+          className: 'dsh-hub__more',
+          title: t('more', { count: hiddenCount }),
+          'aria-label': t('more', { count: hiddenCount }),
+          onClick: () => setExpanded(true),
+        }, `+${hiddenCount}`))
+      } else if (expanded && rows.length > 3) {
+        children.push(h('button', {
+          key: 'collapse',
+          type: 'button',
+          className: 'dsh-hub__more',
+          onClick: () => setExpanded(false),
+        }, t('collapse')))
       }
     }
 
