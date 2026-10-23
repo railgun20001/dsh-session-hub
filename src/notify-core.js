@@ -64,8 +64,6 @@ export const DEFAULT_CONFIG = Object.freeze({
   requireVisibleForFocus: true,
   /** 事件时间早于该窗口的边沿只推进水位、不通知。0 表示关闭该保护。 */
   freshnessWindowMs: 120000,
-  /** 同一会话的新通知替换旧通知（tag），避免一个会话堆一列。 */
-  replacePerSession: true,
   /** 系统提示音。 */
   sound: true,
   /** 点击通知时请求宿主半把桌面窗口提到前台（见 lib/raise-window.js）。 */

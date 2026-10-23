@@ -332,12 +332,12 @@ test('新一轮完成弹「任务完成」，点通知跳回会话并把窗口�
     const toast = harness.state.notifications[0]
     assert.equal(toast.title, 'DSH · 任务完成')
     assert.equal(toast.options.body, '会话 s1')
-    assert.equal(toast.options.tag, 'dsh-session-hub:s1')
+    assert.equal(toast.options.tag, 'dsh-session-hub:s1#completed:12')
     assert.equal(toast.options.requireInteraction, false)
     assert.equal(toast.options.silent, false)
-    // 有 tag 就必须 renotify：否则同 tag 的新通知只会原地更新通知中心里那一条，
-    // 屏幕不弹横幅（「有通知没浮窗」的根因）。
-    assert.equal(toast.options.renotify, true)
+    // 每条事件一个唯一 tag，且刻意不传 renotify：本机实测「同 tag 替换」那条平台
+    // 路径会把通知整条丢掉（连 Windows 都收不到提交），所以绝不走它。
+    assert.equal('renotify' in toast.options, false)
 
     // 真实场景里点 toast 时窗口通常不在前台；这里显式模拟未聚焦。
     globalThis.document.hasFocus = () => false
@@ -361,22 +361,25 @@ test('新一轮完成弹「任务完成」，点通知跳回会话并把窗口�
   }
 })
 
-test('关掉 replacePerSession 时既不带 tag，也不要求 renotify', async () => {
+test('同一会话的两次事件用两个不同的 tag，不依赖平台替换', async () => {
   const harness = await createHarness({
     sessions: [sessionRow('s1')],
     projections: { s1: turnEnd(10, 'completed') },
   })
   try {
     await settle()
-    globalThis.__DSH_SESSION_HUB__.setConfig({ replacePerSession: false })
     harness.setProjection('s1', turnEnd(12, 'completed'))
     await settle()
+    harness.setProjection('s1', turnEnd(13, 'completed'))
+    await settle()
 
-    assert.equal(harness.state.notifications.length, 1)
-    const toast = harness.state.notifications[0]
-    assert.equal(toast.options.tag, undefined)
-    // 规范里 renotify 只在有 tag 时有意义，没有 tag 就别声明，避免平台差异。
-    assert.equal(toast.options.renotify, false)
+    assert.equal(harness.state.notifications.length, 2)
+    const [first, second] = harness.state.notifications
+    assert.equal(first.options.tag, 'dsh-session-hub:s1#completed:12')
+    assert.equal(second.options.tag, 'dsh-session-hub:s1#completed:13')
+    assert.notEqual(first.options.tag, second.options.tag, '同会话的不同事件不能共用 tag')
+    // tag 都以「插件:会话」开头，平台侧仍能看出它们属于同一个会话。
+    assert.match(second.options.tag, /^dsh-session-hub:s1#/)
   } finally {
     harness.dispose()
     harness.restore()
@@ -397,7 +400,7 @@ test('通知落地结果写进诊断日志：onshow 记 shown', async () => {
     assert.equal(log.length, 1, '一次通知只应记一条结果')
     assert.equal(log[0].stage, 'shown')
     assert.equal(log[0].sessionId, 's1')
-    assert.equal(log[0].tag, 'dsh-session-hub:s1')
+    assert.equal(log[0].tag, 'dsh-session-hub:s1#completed:12')
     assert.equal(log[0].permission, 'granted')
 
     // 清空后重新读回空表（排障入口要能复位）。

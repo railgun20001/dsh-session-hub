@@ -130,15 +130,22 @@
 **不会**为「正在思考 / 正在执行工具」这类实时活动弹通知；这正是多数通知插件最吵的地方。
 「开始运行」默认也不通知——通常是你自己刚发的消息，没有任何新信息值得打扰。
 
-点击通知：`openSession` 跳转 + 宿主半前置窗口。通知带 `tag`，同一会话的新通知会替换旧的；
-**替换时必须带 `renotify: true`**——Web Notifications 的 `renotify` 默认 `false`，此时只要
-上一次同 `tag` 的通知还留在通知中心里，新通知只会把那条原地更新，屏幕既不出横幅也不出声，
-表现就是「通知中心里有、屏幕上没浮窗」。
+点击通知：`openSession` 跳转 + 宿主半前置窗口。每条通知的 `tag` 是
+`dsh-session-hub:<会话 id>#<事件键>`——**一次事件一个唯一 tag，永不与别的通知共用**。
 多标签页共享 `localStorage` 时同一事件只弹一条。
 
+为什么不复用同一个 tag 做「同会话替换旧通知」：2026-10-23 白天现场（Windows 11 +
+Electron 44）证实，走进平台「替换 / renotify」分支的通知会被**整条丢弃**——Windows 的
+`PushNotification-Platform` 连提交记录都没有（15:38–15:47 的 5 条正常投递之后，15:54 起
+全部消失），而渲染进程既拿不到 `onshow` 也拿不到 `onerror`。代价是同会话连续几条会各自
+成条（不再自动合并），换来的是**每一条都一定落在通知中心里**。
+
 通知到底有没有落到系统上，看客户端半的落地日志（`localStorage` 的 `dsh-session-hub/notify-log-v1`，
-保留最近 20 条）：`stage` 为 `shown` 才算真的显示；`no-event` 表示浏览器既没显示也没报错
-（通知平台不可用）；`error` / `permission` 是浏览器侧拒绝。
+保留最近 20 条）：`shown` 是浏览器确认已显示，`error` / `permission` 是浏览器侧拒绝，
+`no-event` 只表示 2.5 秒内**没等到回执**——本机实测存在「横幅和通知中心都出现了、但
+`onshow` 不派发」的通知，所以它属于「未知」，既不能当成功也不能当失败，更不能用它触发
+重发（那会补一条重复通知）。要确认系统侧，查
+`Microsoft-Windows-PushNotification-Platform/Operational` 里的 2416 / 3052 事件。
 
 ---
 
@@ -244,7 +251,6 @@ plugins/dsh-session-hub/
 | `silenceAllWhenFocused` | `false` | 聚焦时一律不弹 |
 | `requireVisibleForFocus` | `true` | 最小化/隐藏视作不聚焦（照常弹） |
 | `freshnessWindowMs` | `120000` | 超过这个时长的事件只推进水位、不通知（`0` 关闭） |
-| `replacePerSession` | `true` | 同一会话的新通知替换旧通知 |
 | `sound` | `true` | 系统提示音 |
 | `raiseWindow` | `true` | 点击通知 / chip 时请求宿主半前置窗口 |
 
