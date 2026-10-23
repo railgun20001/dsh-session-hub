@@ -30,8 +30,8 @@
   ],
   "scripts": {
     "build": "node build/bundle.mjs",
-    "test": "node --test test/hub-model-test.mjs test/hub-ui-test.mjs test/projection-test.mjs test/client-half-test.mjs test/raise-window-test.mjs",
-    "check": "node build/bundle.mjs --check && node --test test/hub-model-test.mjs test/hub-ui-test.mjs test/projection-test.mjs test/client-half-test.mjs test/raise-window-test.mjs"
+    "test": "node --test test/hub-model-test.mjs test/hub-scroll-test.mjs test/hub-ui-test.mjs test/projection-test.mjs test/client-half-test.mjs test/raise-window-test.mjs",
+    "check": "node build/bundle.mjs --check && node --test test/hub-model-test.mjs test/hub-scroll-test.mjs test/hub-ui-test.mjs test/projection-test.mjs test/client-half-test.mjs test/raise-window-test.mjs"
   },
   "dsh": {
     "bundle": {

@@ -32,6 +32,8 @@ async function createHarness(boot = {}) {
     storage: new Map(),
     listeners: new Map(),
     registration: null,
+    /** 侧栏行桩：每项形如 `{ dataset: { rowKey }, calls, scrollIntoView }`。 */
+    rows: [],
   }
 
   class FakeNotification {
@@ -71,6 +73,8 @@ async function createHarness(boot = {}) {
   const doc = {
     visibilityState: 'visible',
     hasFocus: () => true,
+    // 侧栏行查找走 `[data-row-key]` 粗筛；行桩由测试通过 state.rows 提供。
+    querySelectorAll: (selector) => (selector === '[data-row-key]' ? state.rows : []),
   }
 
   const localStorageStub = {
@@ -217,6 +221,30 @@ function sessionRow(id, patch = {}) {
 /** 回合结局投影。 */
 function turnEnd(seq, outcome, extra = {}) {
   return { outcome, turn: seq, seq, time: Date.now() - 500, code: null, message: null, ...extra }
+}
+
+/** 造一个侧栏行元素桩，记录 scrollIntoView 的调用参数。 */
+function rowElement(key) {
+  return {
+    dataset: { rowKey: key },
+    calls: [],
+    scrollIntoView(options) { this.calls.push(options) },
+  }
+}
+
+/** 造一个带会话服务 + uiWorkspace 的 ctx.get 覆盖，供跳转类用例使用。 */
+function workspaceCtx(harness, opened, workspaces) {
+  return (serviceName) => {
+    if (serviceName === 'uiWorkspace') {
+      return {
+        openSession: (id) => opened.push(id),
+        ...(workspaces === undefined ? {} : { workspaces: { list: { getSnapshot: () => workspaces } } }),
+      }
+    }
+    if (serviceName === 'sessions') return { list: harness.listStore }
+    if (serviceName === 'uiSession') return { sessionStatus: harness.statusStore }
+    return undefined
+  }
 }
 
 test('bundle 声明了正确的注册 id 与服务依赖', async () => {
@@ -757,6 +785,145 @@ test('窗口已聚焦时点通知不再重复请求前置窗口（不会触碰�
       harness.state.fetches.map((call) => call.url),
       ['dsh-session-hub/warmup'],
     )
+  } finally {
+    harness.dispose()
+    harness.restore()
+  }
+})
+
+// ---- 跳转后的左侧列表滚动 ----
+
+test('点通知跳转后，左侧会话列表滚动到对应会话行', async () => {
+  const harness = await createHarness({
+    sessions: [sessionRow('s1')],
+    projections: { s1: turnEnd(10, 'completed') },
+  })
+  const opened = []
+  harness.ctx.get = workspaceCtx(harness, opened)
+  const target = rowElement('session:s1')
+  harness.state.rows.push(target)
+  try {
+    await settle()
+    harness.setProjection('s1', turnEnd(12, 'completed'))
+    await settle()
+    assert.equal(harness.state.notifications.length, 1)
+
+    harness.state.notifications[0].onclick()
+    await settle()
+
+    assert.deepEqual(opened, ['s1'], '跳转本身照常发生')
+    assert.deepEqual(target.calls, [{ block: 'nearest' }], '列表应滚到该会话行（与官方 reveal 同参数）')
+  } finally {
+    harness.dispose()
+    harness.restore()
+  }
+})
+
+test('目标行稍后才渲染（React 异步提交）时，揭示逻辑会继续重试', async () => {
+  const harness = await createHarness({
+    sessions: [sessionRow('s1')],
+    projections: { s1: turnEnd(10, 'completed') },
+  })
+  const opened = []
+  harness.ctx.get = workspaceCtx(harness, opened)
+  const target = rowElement('session:s1')
+  // 点击那一刻行还没有渲染：30ms 后才出现。
+  const timer = setTimeout(() => harness.state.rows.push(target), 30)
+  try {
+    await settle()
+    harness.setProjection('s1', turnEnd(12, 'completed'))
+    await settle()
+    harness.state.notifications[0].onclick()
+    await new Promise((resolve) => setTimeout(resolve, 150))
+
+    assert.deepEqual(target.calls, [{ block: 'nearest' }], '应在行渲染出来的那一帧滚过去')
+  } finally {
+    clearTimeout(timer)
+    harness.dispose()
+    harness.restore()
+  }
+})
+
+test('会话行被分组折叠隐藏时，退化滚动到所属工作区分组行', async () => {
+  const harness = await createHarness({
+    sessions: [sessionRow('s1')],
+    projections: { s1: turnEnd(10, 'completed') },
+  })
+  const opened = []
+  harness.ctx.get = workspaceCtx(harness, opened, {
+    items: [{ workspaceId: 'w1', sessionIds: ['s1'] }],
+  })
+  const groupRow = rowElement('workspace:w1')
+  harness.state.rows.push(groupRow)
+  try {
+    await settle()
+    harness.setProjection('s1', turnEnd(12, 'completed'))
+    await settle()
+    harness.state.notifications[0].onclick()
+    await settle()
+
+    assert.deepEqual(groupRow.calls, [{ block: 'nearest' }], '会话行不存在时应滚到它所属的分组行')
+  } finally {
+    harness.dispose()
+    harness.restore()
+  }
+})
+
+test('会话行与分组行都不存在时静默放弃，跳转照常完成', async () => {
+  const harness = await createHarness({
+    sessions: [sessionRow('s1')],
+    projections: { s1: turnEnd(10, 'completed') },
+  })
+  const opened = []
+  harness.ctx.get = workspaceCtx(harness, opened)
+  try {
+    await settle()
+    harness.setProjection('s1', turnEnd(12, 'completed'))
+    await settle()
+    harness.state.notifications[0].onclick()
+    await settle()
+
+    assert.deepEqual(opened, ['s1'], '滚动找不到目标时不得影响跳转')
+  } finally {
+    harness.dispose()
+    harness.restore()
+  }
+})
+
+test('滚动时宿主抛错也不会影响跳转与通知（异常被吞掉）', async () => {
+  const harness = await createHarness({
+    sessions: [sessionRow('s1')],
+    projections: { s1: turnEnd(10, 'completed') },
+  })
+  const opened = []
+  harness.ctx.get = workspaceCtx(harness, opened)
+  harness.state.rows.push({
+    dataset: { rowKey: 'session:s1' },
+    scrollIntoView: () => { throw new Error('not supported') },
+  })
+  try {
+    await settle()
+    harness.setProjection('s1', turnEnd(12, 'completed'))
+    await settle()
+    assert.doesNotThrow(() => harness.state.notifications[0].onclick())
+    await settle()
+    assert.deepEqual(opened, ['s1'])
+  } finally {
+    harness.dispose()
+    harness.restore()
+  }
+})
+
+test('诊断入口可单独验证列表揭示（不跳转）', async () => {
+  const harness = await createHarness({ sessions: [sessionRow('s1')] })
+  const target = rowElement('session:s1')
+  harness.state.rows.push(target)
+  try {
+    await settle()
+    const api = globalThis.__DSH_SESSION_HUB__
+    assert.equal(api.revealSessionRow('s1'), 'session')
+    assert.deepEqual(target.calls, [{ block: 'nearest' }])
+    assert.equal(api.revealSessionRow('missing'), null)
   } finally {
     harness.dispose()
     harness.restore()

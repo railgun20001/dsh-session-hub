@@ -105,6 +105,15 @@
 最大化被取消」的根因。通知点击也只在窗口确实不在前台时才请求前置；宿主半现在按
 `IsIconic` / `IsZoomed` 分支，最小化才 `SW_RESTORE`，最大化用 `SW_SHOWMAXIMIZED` 保持。
 
+**跳转后左侧会话列表也会滚动到该会话行**：官方 ui-workspace 的列表 reveal（展开折叠
+分组 + `scrollIntoView`）只挂在**侧栏搜索结果点击**上，公开的 `uiWorkspace.openSession()`
+只切换主视图、不滚动列表——长列表里目标行可能在视野外，点了 chip 左侧看不出变化。
+插件因此自己补一次「滚到行」（`src/hub-scroll.js`）：按官方列表行的 `data-row-key`
+（`session:<id>`）定位，用与官方 reveal 完全相同的 `scrollIntoView({ block: "nearest" })`；
+会话行始终找不到（分组被折叠 / 被归档过滤）时退化到它所属的 `workspace:<id>` 分组行。
+跳转后列表要等 React 提交才渲染目标行，所以用 rAF 重试到 1.5 秒；找不到就静默放弃，
+任何异常都被吞掉，绝不影响跳转本身。
+
 ---
 
 ## 3. Windows 通知
@@ -167,10 +176,11 @@ plugins/dsh-session-hub/
 ├── src/
 │   ├── hub-model.js         状态栏 / 任务栏纯逻辑（可单测）
 │   ├── notify-core.js       通知边沿引擎（纯逻辑，可单测）
+│   ├── hub-scroll.js        侧栏会话行定位与滚动（纯逻辑，可单测）
 │   ├── hub-ui.js            顶部状态栏 React 组件
 │   └── client-main.js       接线：服务 → 模型 → 通知 / 状态栏 / 任务栏
-├── build/bundle.mjs         把四个源文件内联成单文件浏览器 bundle（--check 校验）
-├── test/                    71 个用例
+├── build/bundle.mjs         把五个源文件内联成单文件浏览器 bundle（--check 校验）
+├── test/                    89 个用例
 ├── locale/{zh,en}.json      插件管理器的标题与描述
 ├── icon.svg                 插件图标
 └── cordis.patch.yml         bundle patch：插入 session-hub 行
@@ -243,7 +253,7 @@ __DSH_SESSION_HUB__.setConfig({ silenceAllWhenFocused: true })
 
 ```powershell
 cd C:\work\my\dsh\plugins\dsh-session-hub
-npm run check      # 1) 校验 lib/client.js 与源码一致  2) 跑 71 个用例
+npm run check      # 1) 校验 lib/client.js 与源码一致  2) 跑 89 个用例
 ```
 
 DSH 窗口 DevTools 控制台：
@@ -258,6 +268,7 @@ __DSH_SESSION_HUB__.getTaskbarState()  // red / yellow / green / none
 __DSH_SESSION_HUB__.setTaskbarState('red')    // 手动试任务栏红点（排障）
 __DSH_SESSION_HUB__.setTaskbarState('none')   // 清掉
 __DSH_SESSION_HUB__.testNotification() // 弹一条测试通知，点它应跳回当前会话
+__DSH_SESSION_HUB__.revealSessionRow('session-…') // 'session' / 'workspace' / null：验证左侧列表能滚到该会话行（不跳转）
 __DSH_SESSION_HUB__.pingHost()         // 'present' / 'absent' / 'unknown'
 ```
 
@@ -278,6 +289,8 @@ Invoke-RestMethod -Uri http://127.0.0.1:14489/dsh-session-hub/debug -Method POST
    把鼠标停在该会话行上，悬停卡片里出现红点「本轮失败」/「本轮中断」；
 4. 触发提问 / 审批 → 弹「DSH · 需要你回应」，状态栏黄点「等待回答」，任务栏变黄；
 5. 点击红点条目 → 报错确认，红点与任务栏红灯消失，行悬停提示同时消失。
+6. 制造一个长列表（展开很多会话 / 把列表滚到远处），点击状态栏 chip 或通知跳转 →
+   **左侧列表自动滚到目标会话行**；目标所在分组折叠时，至少滚到它所属的分组标题。
 
 ---
 
@@ -295,6 +308,9 @@ Invoke-RestMethod -Uri http://127.0.0.1:14489/dsh-session-hub/debug -Method POST
   结束的冷会话没有该键的行，需等该会话被打开一次（全量重折叠）才补齐。
 - **报错不会自动过期**：需要点击条目或打开该会话确认；这是刻意设计——失败值得你看一眼。
 - **`includeSubagents` 打开后**，状态栏可能出现较多行，插件最多渲染 40 行。
+- **左侧列表滚动依赖官方 DOM 约定**：会话行 / 分组行按 `data-row-key`（`session:<id>` /
+  `workspace:<id>`）定位。上游若改掉该属性，滚动会静默失效（跳转本身不受影响）——
+  `__DSH_SESSION_HUB__.revealSessionRow(id)` 返回 null 即可确认约定漂移。
 
 ---
 

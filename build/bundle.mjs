@@ -12,9 +12,10 @@
  *
  *   src/hub-model.js（ESM，纯逻辑，可单测）        → 去掉 `export ` 前缀
  *   src/notify-core.js（ESM，通知边沿引擎，可单测）→ 去掉 `export ` 前缀
+ *   src/hub-scroll.js（ESM，侧栏行定位，可单测）   → 去掉 `export ` 前缀
  *   src/hub-ui.js（裸脚本，React 组件工厂）        → 原样内联
  *   src/client-main.js（裸脚本，接线）             → 原样内联
- *   四者塞进 factory 函数体，末尾挂 `exports.apply` / `exports.inject`。
+ *   五者塞进 factory 函数体，末尾挂 `exports.apply` / `exports.inject`。
  *
  * 用法：
  *   node build/bundle.mjs            # 生成 lib/client.js
@@ -36,6 +37,7 @@ const PACKAGE_NAME = 'dsh-session-hub'
 /** 源码与产物路径。 */
 const MODEL_SOURCE = join(ROOT, 'src', 'hub-model.js')
 const CORE_SOURCE = join(ROOT, 'src', 'notify-core.js')
+const SCROLL_SOURCE = join(ROOT, 'src', 'hub-scroll.js')
 const UI_SOURCE = join(ROOT, 'src', 'hub-ui.js')
 const MAIN_SOURCE = join(ROOT, 'src', 'client-main.js')
 const PACKAGE_JSON = join(ROOT, 'package.json')
@@ -84,6 +86,7 @@ function indent(source, pad) {
 function build() {
   const model = inlineEsModule(readFileSync(MODEL_SOURCE, 'utf8'), 'hub-model.js')
   const core = inlineEsModule(readFileSync(CORE_SOURCE, 'utf8'), 'notify-core.js')
+  const scroll = inlineEsModule(readFileSync(SCROLL_SOURCE, 'utf8'), 'hub-scroll.js')
   const ui = readFileSync(UI_SOURCE, 'utf8')
   const main = readFileSync(MAIN_SOURCE, 'utf8')
   // 版本从 package.json 注入，保证「宿主半读 package.json」与「客户端半内联」永远一致：
@@ -98,6 +101,7 @@ function build() {
  * 内联自：
  *   - src/hub-model.js     状态栏 / 任务栏纯逻辑
  *   - src/notify-core.js   通知决策引擎（纯逻辑）
+ *   - src/hub-scroll.js    侧栏会话行定位与滚动（纯逻辑）
  *   - src/hub-ui.js        顶部状态栏 React 组件
  *   - src/client-main.js   接线：DSH 服务 → 模型 → 通知 / 状态栏 / 任务栏
  *
@@ -134,6 +138,8 @@ window.__ModuleLoader__.load({
     indent(core.trimEnd(), '\t\t'),
     '\n\t\t//#endregion\n\t\t//#region src/hub-ui.js\n',
     indent(ui.trimEnd(), '\t\t'),
+    '\n\t\t//#endregion\n\t\t//#region src/hub-scroll.js\n',
+    indent(scroll.trimEnd(), '\t\t'),
     '\n\t\t//#endregion\n\t\t//#region src/client-main.js\n',
     indent(main.trimEnd(), '\t\t'),
     footer,

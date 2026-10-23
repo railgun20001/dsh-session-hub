@@ -6,7 +6,8 @@
  *   2. 交给纯逻辑模型 `deriveHubRows` 推导状态栏行，交给 `planNotifications` 算通知边沿；
  *   3. 注册 `conversation.header.leading` 插槽，在工作区上方显示会话状态栏；
  *   4. 把聚合状态发给宿主半，由宿主半用 ITaskbarList3 标记任务栏图标（红/黄/绿）；
- *   5. 状态变化时弹 Windows 系统通知；点击通知 / 状态栏条目跳转到对应会话。
+ *   5. 状态变化时弹 Windows 系统通知；点击通知 / 状态栏条目跳转到对应会话，
+ *      并把左侧会话列表也滚动到该会话行（官方 openSession 只切换主视图，不滚动列表）。
  *
  * 它不 retain 任何会话——因此不会激活别人的历史，也不会在侧栏里留下痕迹。
  *
@@ -37,6 +38,22 @@ const CROSS_TAB_WINDOW_MS = 4000
 
 /** 状态变化的合并窗口（毫秒）：把一串推送折叠成一次观察。 */
 const TICK_COALESCE_MS = 30
+
+/**
+ * 跳转后等待侧栏渲染出目标会话行的上限（毫秒）。
+ *
+ * 点一下 chip 后列表要等 React 提交、必要时还要先抬高 watermark 才渲染目标行，
+ * 所以不是同步可见的；1.5 秒足够覆盖正常渲染，超过就静默放弃（绝不长时间占用帧）。
+ */
+const REVEAL_RETRY_TIMEOUT_MS = 1500
+
+/**
+ * 揭示重试的最大帧数。
+ *
+ * 与 {@link REVEAL_RETRY_TIMEOUT_MS} 取先到者：文档很大时每次重试都要扫一遍
+ * `[data-row-key]`，40 帧（约 0.7 秒 @60fps）已足够覆盖正常渲染，再等只是浪费。
+ */
+const REVEAL_MAX_ATTEMPTS = 40
 
 /** 水位 / 确认表落盘的合并窗口（毫秒）。 */
 const PERSIST_COALESCE_MS = 400
@@ -247,6 +264,74 @@ function apply(ctx) {
   }
 
   /**
+   * 每次跳转的「列表揭示」序号：新跳转让旧的等待循环立刻退出。
+   *
+   * 连续点几个 chip 时，前几次的重试循环不能把列表再拉回旧会话——只认最新一次。
+   */
+  let revealSequence = 0
+
+  /**
+   * 在下一帧再试一次（优先 rAF，没有时退回定时器）。
+   * @param {() => void} callback 回调。
+   */
+  const scheduleRevealAttempt = (callback) => {
+    try {
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(callback)
+        return
+      }
+    } catch {
+      /* 某些宿主没有 rAF：退回定时器 */
+    }
+    setTimeout(callback, 16)
+  }
+
+  /**
+   * 跳转会话后把左侧会话列表也滚动到对应行。
+   *
+   * ## 为什么需要
+   *
+   * 官方 ui-workspace 的列表 reveal（展开分组 + `scrollIntoView`）只挂在侧栏**搜索结果
+   * 点击**上；公开的 `uiWorkspace.openSession()` 只切换主视图，长列表里目标行可能在
+   * 视野外，用户点状态栏 chip / 通知跳过去后左侧看不出变化。这里补一次「滚到行」。
+   *
+   * ## 时序与退让
+   *
+   * 跳转先改当前会话，列表要等 React 提交后才会（必要时先抬高 watermark 再）渲染
+   * 目标行，所以用 rAF 重试到 {@link REVEAL_RETRY_TIMEOUT_MS}；会话行始终找不到时，
+   * 退化到它所属的工作区分组行（分组折叠时只有组标题在 DOM 里）。整个过程只读 DOM，
+   * 任何异常都吞掉——滚动绝不应当影响跳转本身。
+   *
+   * @param {string} sessionId 目标会话。
+   */
+  const revealSessionInList = (sessionId) => {
+    if (typeof sessionId !== 'string' || sessionId === '') return
+    if (typeof document === 'undefined') return
+    const sequence = (revealSequence += 1)
+    const deadline = Date.now() + REVEAL_RETRY_TIMEOUT_MS
+    let attempts = 0
+    const attempt = () => {
+      if (disposed || sequence !== revealSequence) return
+      let hit = null
+      try {
+        // 工作区归属只用于「会话行不在 DOM」时的退化查找；服务缺失时传 undefined。
+        const workspaceService = safeGet('uiWorkspace')
+        const workspaces = workspaceService?.workspaces?.list?.getSnapshot?.()
+        hit = scrollSessionRowIntoView(document, sessionId, { workspaces })
+      } catch (error) {
+        console.debug(`[${PLUGIN_ID}] 滚动会话列表失败`, error)
+        return
+      }
+      if (hit !== null) return
+      attempts += 1
+      if (attempts >= REVEAL_MAX_ATTEMPTS) return
+      if (Date.now() >= deadline) return
+      scheduleRevealAttempt(attempt)
+    }
+    attempt()
+  }
+
+  /**
    * 调宿主半的内部路由（同源、文档相对，见宿主半 ROUTE_PATH 的说明）。
    *
    * 永远是「发了不管」：路由不存在、宿主半没加载、请求失败都不影响界面本身。
@@ -266,12 +351,13 @@ function apply(ctx) {
   /**
    * 打开一个会话（状态栏条目 / 通知点击的落点）。
    *
-   * 三件事，按重要性排序：
+   * 四件事，按重要性排序：
    *   1. 在应用内跳转到该会话（受支持通道，必然生效）；
-   *   2. 请求宿主半把桌面窗口提到前台（渲染进程自己做不到）；
-   *   3. `window.focus()` 兜底（受 Blink 手势门控，可能无效，但零成本）。
+   *   2. 把左侧会话列表也滚动到该会话行（官方 openSession 不会滚）；
+   *   3. 请求宿主半把桌面窗口提到前台（渲染进程自己做不到）；
+   *   4. `window.focus()` 兜底（受 Blink 手势门控，可能无效，但零成本）。
    *
-   * `options.raise === false` 时跳过第 2 步：**点击状态栏 chip 时窗口本来就在前台**，
+   * `options.raise === false` 时跳过第 3 步：**点击状态栏 chip 时窗口本来就在前台**，
    * 再走一次窗口前置毫无收益，反而会经过 Win32 的窗口状态处理（历史实现里的
    * SW_RESTORE 会把最大化窗口打回普通尺寸）。chip 点击只做应用内跳转。
    * @param {string} sessionId 目标会话。
@@ -296,6 +382,9 @@ function apply(ctx) {
         /* 事件广播失败不影响通知本身 */
       }
     }
+    // 让左侧会话列表也滚到该会话行：官方 openSession 只切换主视图，不滚动列表。
+    // 这一步只读 DOM、异步等待渲染，失败静默，绝不影响上面真正的跳转。
+    revealSessionInList(sessionId)
     if (options.raise !== false) callHostRoute('raise')
     focusWindowBestEffort()
   }
@@ -785,6 +874,21 @@ function apply(ctx) {
       if (byId === undefined || !Object.hasOwn(byId, sessionId)) return false
       openSession(sessionId)
       return true
+    },
+    /**
+     * 手动把左侧会话列表滚动到某个会话行（排障用，不跳转）。
+     *
+     * 返回值同时是一次「DOM 约定体检」：`session` 表示会话行命中；
+     * `workspace` 表示会话行没渲染（分组折叠 / 被过滤），退化到了它所属的分组行；
+     * `null` 表示两者都没找到。
+     * @param {string} sessionId 目标会话。
+     * @returns {'session'|'workspace'|null} 实际滚动到的行类型；没找到时为 null。
+     */
+    revealSessionRow: (sessionId) => {
+      const workspaceService = safeGet('uiWorkspace')
+      const workspaces = workspaceService?.workspaces?.list?.getSnapshot?.()
+      const doc = typeof document === 'undefined' ? null : document
+      return scrollSessionRowIntoView(doc, sessionId, { workspaces })
     },
     /**
      * 手动确认某个会话的全部报错（排障用）。
