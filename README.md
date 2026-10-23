@@ -131,7 +131,14 @@
 「开始运行」默认也不通知——通常是你自己刚发的消息，没有任何新信息值得打扰。
 
 点击通知：`openSession` 跳转 + 宿主半前置窗口。通知带 `tag`，同一会话的新通知会替换旧的；
+**替换时必须带 `renotify: true`**——Web Notifications 的 `renotify` 默认 `false`，此时只要
+上一次同 `tag` 的通知还留在通知中心里，新通知只会把那条原地更新，屏幕既不出横幅也不出声，
+表现就是「通知中心里有、屏幕上没浮窗」。
 多标签页共享 `localStorage` 时同一事件只弹一条。
+
+通知到底有没有落到系统上，看客户端半的落地日志（`localStorage` 的 `dsh-session-hub/notify-log-v1`，
+保留最近 20 条）：`stage` 为 `shown` 才算真的显示；`no-event` 表示浏览器既没显示也没报错
+（通知平台不可用）；`error` / `permission` 是浏览器侧拒绝。
 
 ---
 
@@ -269,6 +276,8 @@ __DSH_SESSION_HUB__.getTaskbarState()  // red / yellow / green / none
 __DSH_SESSION_HUB__.setTaskbarState('red')    // 手动试任务栏红点（排障）
 __DSH_SESSION_HUB__.setTaskbarState('none')   // 清掉
 __DSH_SESSION_HUB__.testNotification() // 弹一条测试通知，点它应跳回当前会话
+__DSH_SESSION_HUB__.getNotifyLog()      // 最近 20 条通知的落地结果（shown / no-event / error / permission / deduped）
+__DSH_SESSION_HUB__.clearNotifyLog()    // 清空落地日志
 __DSH_SESSION_HUB__.revealSessionRow('session-…') // 'session' / 'workspace' / null：验证左侧列表能滚到该会话行（不跳转）
 __DSH_SESSION_HUB__.pingHost()         // 'present' / 'absent' / 'unknown'
 ```

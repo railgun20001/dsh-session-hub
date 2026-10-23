@@ -46,6 +46,15 @@ async function createHarness(boot = {}) {
       this.options = options ?? {}
       this.closed = false
       state.notifications.push(this)
+      // 真实 Chromium 是异步回调 onshow：构造返回后才派发，这里用微任务对齐，
+      // 保证「构造后立刻挂 onshow」的写法在测试里也能收到回调。
+      queueMicrotask(() => {
+        try {
+          this.onshow?.()
+        } catch {
+          /* 桩不关心回调里的异常 */
+        }
+      })
     }
     close() {
       this.closed = true
@@ -326,6 +335,9 @@ test('新一轮完成弹「任务完成」，点通知跳回会话并把窗口�
     assert.equal(toast.options.tag, 'dsh-session-hub:s1')
     assert.equal(toast.options.requireInteraction, false)
     assert.equal(toast.options.silent, false)
+    // 有 tag 就必须 renotify：否则同 tag 的新通知只会原地更新通知中心里那一条，
+    // 屏幕不弹横幅（「有通知没浮窗」的根因）。
+    assert.equal(toast.options.renotify, true)
 
     // 真实场景里点 toast 时窗口通常不在前台；这里显式模拟未聚焦。
     globalThis.document.hasFocus = () => false
@@ -343,6 +355,54 @@ test('新一轮完成弹「任务完成」，点通知跳回会话并把窗口�
       ['dsh-session-hub/warmup', 'dsh-session-hub/raise'],
     )
     assert.equal(harness.state.fetches[1].options.method, 'POST')
+  } finally {
+    harness.dispose()
+    harness.restore()
+  }
+})
+
+test('关掉 replacePerSession 时既不带 tag，也不要求 renotify', async () => {
+  const harness = await createHarness({
+    sessions: [sessionRow('s1')],
+    projections: { s1: turnEnd(10, 'completed') },
+  })
+  try {
+    await settle()
+    globalThis.__DSH_SESSION_HUB__.setConfig({ replacePerSession: false })
+    harness.setProjection('s1', turnEnd(12, 'completed'))
+    await settle()
+
+    assert.equal(harness.state.notifications.length, 1)
+    const toast = harness.state.notifications[0]
+    assert.equal(toast.options.tag, undefined)
+    // 规范里 renotify 只在有 tag 时有意义，没有 tag 就别声明，避免平台差异。
+    assert.equal(toast.options.renotify, false)
+  } finally {
+    harness.dispose()
+    harness.restore()
+  }
+})
+
+test('通知落地结果写进诊断日志：onshow 记 shown', async () => {
+  const harness = await createHarness({
+    sessions: [sessionRow('s1')],
+    projections: { s1: turnEnd(10, 'completed') },
+  })
+  try {
+    await settle()
+    harness.setProjection('s1', turnEnd(12, 'completed'))
+    await settle()
+
+    const log = globalThis.__DSH_SESSION_HUB__.getNotifyLog()
+    assert.equal(log.length, 1, '一次通知只应记一条结果')
+    assert.equal(log[0].stage, 'shown')
+    assert.equal(log[0].sessionId, 's1')
+    assert.equal(log[0].tag, 'dsh-session-hub:s1')
+    assert.equal(log[0].permission, 'granted')
+
+    // 清空后重新读回空表（排障入口要能复位）。
+    assert.deepEqual(globalThis.__DSH_SESSION_HUB__.clearNotifyLog(), [])
+    assert.deepEqual(globalThis.__DSH_SESSION_HUB__.getNotifyLog(), [])
   } finally {
     harness.dispose()
     harness.restore()

@@ -32,9 +32,21 @@ const CONFIG_KEY = `${PLUGIN_ID}/config-v1`
 const WATERMARK_KEY = `${PLUGIN_ID}/watermarks-v1`
 const RECENT_KEY = `${PLUGIN_ID}/recent-v1`
 const ACK_KEY = `${PLUGIN_ID}/error-acks-v1`
+const NOTIFY_LOG_KEY = `${PLUGIN_ID}/notify-log-v1`
 
 /** 多标签页去重窗口：同一事件在此窗口内只允许一个页面真的弹通知。 */
 const CROSS_TAB_WINDOW_MS = 4000
+
+/** 通知结果诊断日志保留条数（环形，只留最近若干条）。 */
+const NOTIFY_LOG_LIMIT = 20
+
+/**
+ * 等待 `onshow` / `onerror` 的上限（毫秒）。
+ *
+ * 超过这个时间两个事件都没来，说明**浏览器根本没把通知交给系统**（既没显示也没报错），
+ * 这正是「通知中心里有 / 通知没弹出来」时最需要区分的一种状态，单独记成 `no-event`。
+ */
+const NOTIFY_SHOW_TIMEOUT_MS = 2500
 
 /** 状态变化的合并窗口（毫秒）：把一串推送折叠成一次观察。 */
 const TICK_COALESCE_MS = 30
@@ -144,6 +156,29 @@ function claimEvent(dedupeKey) {
   if (claimed) kept[dedupeKey] = now
   writeJson(RECENT_KEY, kept)
   return claimed
+}
+
+/**
+ * 记录一条通知结果诊断（环形日志，落 localStorage）。
+ *
+ * 为什么要落盘而不是只 `console.warn`：桌面端的渲染进程控制台平时没人看，
+ * 而「通知没弹」恰恰是**现场已经过去**才被发现的故障；把最近若干条的
+ * 权限状态 / 构造结果 / `onshow` / `onerror` 留在 `notify-log-v1` 里，
+ * 事后读 localStorage 就能判断是插件没发、浏览器没交给系统，还是系统没显示。
+ * 记录本身失败绝不影响通知流程。
+ * @param {object} entry 一条诊断（stage 为阶段，其余字段随阶段变化）。
+ * @returns {void}
+ */
+function recordNotify(entry) {
+  try {
+    const log = readJson(NOTIFY_LOG_KEY, [])
+    const list = Array.isArray(log) ? log : []
+    list.push({ at: new Date().toISOString(), ...entry })
+    while (list.length > NOTIFY_LOG_LIMIT) list.shift()
+    writeJson(NOTIFY_LOG_KEY, list)
+  } catch (error) {
+    console.warn(`[${PLUGIN_ID}] 写入通知诊断日志失败`, error)
+  }
 }
 
 /**
@@ -440,32 +475,77 @@ function apply(ctx) {
    * @param {object} notification 引擎产出的通知描述。
    */
   const showNotification = (notification) => {
-    if (typeof Notification === 'undefined') return
+    /** 诊断日志的公共字段。 */
+    const base = {
+      sessionId: notification.sessionId,
+      category: notification.category,
+      title: notification.title,
+      permission: typeof Notification === 'undefined' ? 'unsupported' : String(Notification.permission),
+    }
+    if (typeof Notification === 'undefined') {
+      recordNotify({ ...base, stage: 'unsupported' })
+      return
+    }
     if (Notification.permission !== 'granted') {
+      recordNotify({ ...base, stage: 'permission' })
       console.warn(`[${PLUGIN_ID}] 通知权限为 ${String(Notification.permission)}，跳过：${notification.title}`)
       return
     }
-    if (!claimEvent(notification.dedupeKey)) return
+    if (!claimEvent(notification.dedupeKey)) {
+      // 别的标签页已经抢先弹了同一条事件；不是故障，但记下来免得被误当成「没通知」。
+      recordNotify({ ...base, stage: 'deduped' })
+      return
+    }
 
     // 通知已经弹出，用户很可能一两秒内点它：提前把宿主半的窗口前置器烧热。
     if (!warmedUp) {
       warmedUp = true
       callHostRoute('warmup')
     }
+
+    // 同一会话的新通知替换旧的（tag），避免一个会话堆成一列。
+    const tag = config.replacePerSession ? `${PLUGIN_ID}:${notification.sessionId}` : undefined
     let toast
     try {
       toast = new Notification(notification.title, {
         body: notification.body,
-        // 同一会话的新通知替换旧的，避免一个会话堆成一列。
-        tag: config.replacePerSession ? `${PLUGIN_ID}:${notification.sessionId}` : undefined,
+        tag,
+        // 必须的：带 tag 时浏览器默认「静默替换」——只要上一次同 tag 的通知还在通知中心里，
+        // 新通知就只把那一条原地更新，既不出横幅也不出声（Web Notifications 的 renotify
+        // 默认 false），表现为「通知中心里有、屏幕上没浮窗」。renotify 只在给了 tag 时有效，
+        // 故与 tag 同生同灭。
+        renotify: tag !== undefined,
         // silent=true 表示不出声。
         silent: config.sound !== true,
         // 需要你回应的通知常驻，直到用户处理（Windows 上也会留在操作中心）。
         requireInteraction: notification.category === 'answer',
       })
     } catch (error) {
+      recordNotify({ ...base, tag, stage: 'construct-failed', detail: String(error) })
       console.warn(`[${PLUGIN_ID}] 创建通知失败`, error)
       return
+    }
+
+    // 结果诊断：`shown` 才算真的落到了系统通知上；`no-event` 表示浏览器既没交给系统
+    // 也没报错（典型是通知平台不可用），`error` 表示浏览器明确拒绝。三者足以定位
+    // 「为什么屏幕不弹」是在插件这一侧还是浏览器/系统那一侧。
+    let settled = false
+    const settle = (stage, detail) => {
+      if (settled) return
+      settled = true
+      recordNotify({ ...base, tag, stage, detail })
+    }
+    try {
+      toast.onshow = () => settle('shown')
+      toast.onerror = (event) => {
+        settle('error', event?.error?.message ?? event?.message ?? 'unknown')
+        console.warn(`[${PLUGIN_ID}] 通知显示失败：${notification.title}`)
+      }
+      if (typeof setTimeout === 'function') {
+        setTimeout(() => settle('no-event'), NOTIFY_SHOW_TIMEOUT_MS)
+      }
+    } catch (error) {
+      recordNotify({ ...base, tag, stage: 'hook-failed', detail: String(error) })
     }
 
     toast.onclick = () => {
@@ -478,9 +558,6 @@ function apply(ctx) {
       openSession(notification.sessionId, { raise: !isFocused(config) })
     }
     toast.onclose = () => {}
-    toast.onerror = () => {
-      console.warn(`[${PLUGIN_ID}] 通知显示失败：${notification.title}`)
-    }
   }
 
   /** 宿主半在线状态：unknown（还没问过）/ checking / present / absent。 */
@@ -846,6 +923,24 @@ function apply(ctx) {
       /** 宿主半在线状态（由 /ping 判定，与「有没有投影值」无关）。 */
       hostHalf: hostHalfState,
     }),
+    /**
+     * 最近若干条通知的落地结果（排障用）。
+     *
+     * `stage` 取值：`shown`（交给了系统并显示）/ `no-event`（浏览器既没显示也没报错）/
+     * `error`（浏览器拒绝）/ `permission`（权限不是 granted，根本没发）/
+     * `deduped`（别的标签页已弹）/ `construct-failed`（构造函数抛错）/
+     * `unsupported`（环境没有 Notification）。
+     * @returns {Array<object>} 诊断日志（时间正序，最多 {@link NOTIFY_LOG_LIMIT} 条）。
+     */
+    getNotifyLog: () => {
+      const log = readJson(NOTIFY_LOG_KEY, [])
+      return Array.isArray(log) ? log : []
+    },
+    /** 清空通知诊断日志（排障用）。 */
+    clearNotifyLog: () => {
+      writeJson(NOTIFY_LOG_KEY, [])
+      return []
+    },
     /** 主动问一次宿主半在不在（返回 Promise，解析为最终状态）。 */
     pingHost: async () => {
       hostHalfCheckedAt = 0
