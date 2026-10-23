@@ -15,7 +15,12 @@
  *
  * ## 状态与优先级
  *
- *   等待回答（answer，黄） > 报错（error，红） > 运行中（running，蓝） > 待查看（unread，绿）
+ *   报错（error，红） > 等待回答（answer，黄） > 待查看（unread，绿） > 运行中（running，蓝）
+ *
+ * 口径与任务栏一致：**红 → 黄 → 绿 → 蓝**，越靠前的颜色越需要你介入，
+ * 也让「状态栏 chip 顺序」和「任务栏点灯颜色」永远说的是同一种优先级。
+ * 注意这只决定**显示顺序**；一个会话归到哪一类仍由 `deriveHubRows` 的判定顺序决定
+ * （同时在等你回答又还没确认上一轮失败时，按「等待回答」显示，因为它更要求你动手）。
  *
  * 任务栏只取最高优先级的三色：
  *   - 有报错 → red
@@ -29,12 +34,19 @@
 /** 三类「需要你回应」的待交互（与 dsh-client-ui-workspace 的 visiblePendingKind 同口径）。 */
 export const HUB_PENDING_KINDS = Object.freeze(['approval', 'plan-review', 'question'])
 
-/** 状态排序：数字越小越靠前（也越"需要人"）。 */
+/**
+ * 状态排序：数字越小越靠前。
+ *
+ * 顺序刻意与颜色一致——**红（报错）> 黄（等待回答）> 绿（待查看）> 蓝（运行中）**：
+ * 一眼扫过去就是「先看红的、最后才看还在跑的」，也和任务栏点灯的优先级同源。
+ * 注意这只是**显示顺序**，不是状态判定顺序（判定见 deriveHubRows：
+ * 等待回答 > 报错 > 运行中 > 待查看，同时在等你时优先按「等待回答」显示）。
+ */
 export const STATE_ORDER = Object.freeze({
-  answer: 0,
-  error: 1,
-  running: 2,
-  unread: 3,
+  error: 0,
+  answer: 1,
+  unread: 2,
+  running: 3,
 })
 
 /** 状态的中文短标签（状态栏 chip 与通知调试用）。 */
@@ -138,7 +150,7 @@ export function isUnackedFailure(projection, ackedSeq) {
  * @param {boolean} [input.includeSubagents] 是否包含子代理会话（默认 false）。
  * @param {number} [input.now] 当前时间（保留给未来排序/过期策略）。
  * @returns {Array<{id: string, title: string, state: string, pendingKind: string|null, errorSeq: number|null, updatedAt: number}>}
- *   按优先级与更新时间排好序的行。
+ *   按颜色优先级（红 > 黄 > 绿 > 蓝）与更新时间排好序的行。
  */
 export function deriveHubRows({ list, statuses, ackErrors = {}, includeSubagents = false, now = 0 } = {}) {
   const byId = list?.byId
@@ -163,6 +175,9 @@ export function deriveHubRows({ list, statuses, ackErrors = {}, includeSubagents
     const running = status?.running === true || row.running === true
     const unread = status?.completionUnread === true
 
+    // 判定顺序（一个会话只归一类，取第一个命中的）：等待回答 > 报错 > 运行中 > 待查看。
+    // 这与 STATE_ORDER（显示顺序 红 > 黄 > 绿 > 蓝）是两件事：同时「等你回答」又「上一轮
+    // 还没确认失败」时，归为「等待回答」——它才是当下马上要你动手的那件事。
     let state = null
     if (pendingKind !== null) state = 'answer'
     else if (failed) state = 'error'
@@ -180,6 +195,8 @@ export function deriveHubRows({ list, statuses, ackErrors = {}, includeSubagents
     })
   }
 
+  // 显示顺序：红（报错）> 黄（等待回答）> 绿（待查看）> 蓝（运行中）；
+  // 同一类里更新时间新的靠前，最后用 id 兜底保证顺序稳定（避免 React key 跳动）。
   rows.sort((a, b) => {
     const byState = (STATE_ORDER[a.state] ?? 99) - (STATE_ORDER[b.state] ?? 99)
     if (byState !== 0) return byState

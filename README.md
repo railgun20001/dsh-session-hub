@@ -2,8 +2,8 @@
 
 给 DeepSeek Harness 补一个「所有对话现在怎么样了」的统一视图：
 
-- **软件顶端标题栏的状态栏**：按 `等待回答 > 报错 > 运行中 > 待查看` 排列当前需要关注的对话，
-  点一下直接跳到该对话；
+- **软件顶端标题栏的状态栏**：按颜色顺序 `红（报错）> 黄（等待回答）> 绿（待查看）> 蓝（运行中）`
+  排列当前需要关注的对话，点一下直接跳到该对话；
 - **Windows 通知**：对话状态发生变化（完成 / 失败 / 需要你回答）时弹系统通知，
   点击通知跳回对应对话并尽量把 DSH 窗口提到前台；
 - **任务栏状态点**：用 `ITaskbarList3.SetOverlayIcon` 在任务栏的 DSH 图标上画
@@ -15,10 +15,15 @@
 
 | 状态 | 判定依据（客户端受支持服务） | 状态栏 | 任务栏 |
 |---|---|---|---|
-| **等待回答** `answer` | `uiSession.sessionStatus.pendingInteraction.kind ∈ approval / plan-review / question` | 🟡 黄点 + 「等待回答」 | 黄（无红灯时） |
 | **报错** `error` | 宿主投影 `hubTurnOutcome.outcome ∈ error / interrupted`，且该 `seq` 未被确认 | 🔴 红点 + 「报错」 | 红（最高） |
-| **运行中** `running` | `sessionStatus.running` 或会话行 `running` | 🔵 蓝点 + 「运行中」 | 绿（无红/黄时） |
+| **等待回答** `answer` | `uiSession.sessionStatus.pendingInteraction.kind ∈ approval / plan-review / question` | 🟡 黄点 + 「等待回答」 | 黄（无红灯时） |
 | **待查看** `unread` | `sessionStatus.completionUnread === true`（原生「未读完成」绿点） | 🟢 绿点 + 「待查看」 | 绿（无红/黄时） |
+| **运行中** `running` | `sessionStatus.running` 或会话行 `running` | 🔵 蓝点 + 「运行中」 | 绿（无红/黄时） |
+
+- **状态栏 chip 的显示顺序 = 颜色顺序：红 > 黄 > 绿 > 蓝**（`STATE_ORDER`），同一类里更新时间新的靠前。
+  最需要你介入的排最前，正在跑的排最后——所以默认只显示的 3 条永远不会被「运行中」占位。
+- **判定顺序**（一个会话归到哪一类，取第一个命中的）与显示顺序无关：
+  等待回答 > 报错 > 运行中 > 待查看。既在等你回答、上一轮又还没确认失败时按「等待回答」显示。
 
 - 空白「新会话」占位行与子代理会话（`origin: subagent`）不进入状态栏，也不通知。
 - 「报错」在**点击该条目**或**正看着该会话且窗口聚焦**时自动确认（记下 `seq`），

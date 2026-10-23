@@ -13,6 +13,7 @@ import {
   isUnackedFailure,
   normalizeAckErrors,
   projectionOf,
+  STATE_ORDER,
 } from '../src/hub-model.js'
 
 /**
@@ -65,27 +66,42 @@ test('四类状态都能推导出来', () => {
     ['unread', { completionUnread: true }],
   ])
   const rows = deriveHubRows({ list, statuses })
+  // 四类都能推导出来，且按颜色顺序（红 > 黄 > 绿 > 蓝）排列。
   assert.deepEqual(rows.map((item) => [item.id, item.state]), [
-    ['answer', 'answer'],
     ['error', 'error'],
-    ['running', 'running'],
+    ['answer', 'answer'],
     ['unread', 'unread'],
+    ['running', 'running'],
   ])
 })
 
-test('优先级：等待回答 > 报错 > 运行中 > 待查看', () => {
+test('显示顺序：红（报错）> 黄（等待回答）> 绿（待查看）> 蓝（运行中）', () => {
   const list = listOf([
-    row('unread', { updatedAt: 100 }),
-    row('running', { running: true, updatedAt: 200 }),
-    row('error', { updatedAt: 300 }),
-    row('answer', { updatedAt: 1 }),
+    row('running', { running: true, updatedAt: 400 }),
+    row('unread', { updatedAt: 300 }),
+    row('answer', { updatedAt: 200 }),
+    row('error', { updatedAt: 100 }),
   ], { error: outcome(2, 'interrupted') })
   const statuses = new Map([
     ['answer', { pendingInteraction: { kind: 'approval' } }],
     ['unread', { completionUnread: true }],
   ])
+  // 颜色顺序优先于更新时间：更新的运行中/待查看仍排在旧报错之后。
   assert.deepEqual(deriveHubRows({ list, statuses }).map((item) => item.id), [
-    'answer', 'error', 'running', 'unread',
+    'error', 'answer', 'unread', 'running',
+  ])
+  assert.deepEqual(STATE_ORDER, { error: 0, answer: 1, unread: 2, running: 3 })
+})
+
+test('同一状态内按更新时间倒序，时间相同用 id 兜底', () => {
+  const list = listOf([
+    row('old', { running: true, updatedAt: 10 }),
+    row('new', { running: true, updatedAt: 20 }),
+    row('same-a', { running: true, updatedAt: 5 }),
+    row('same-b', { running: true, updatedAt: 5 }),
+  ])
+  assert.deepEqual(deriveHubRows({ list, statuses: new Map() }).map((item) => item.id), [
+    'new', 'old', 'same-a', 'same-b',
   ])
 })
 
