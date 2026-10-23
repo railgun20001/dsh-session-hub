@@ -293,7 +293,8 @@ function apply(ctx) {
    *
    * 官方 ui-workspace 的列表 reveal（展开分组 + `scrollIntoView`）只挂在侧栏**搜索结果
    * 点击**上；公开的 `uiWorkspace.openSession()` 只切换主视图，长列表里目标行可能在
-   * 视野外，用户点状态栏 chip / 通知跳过去后左侧看不出变化。这里补一次「滚到行」。
+   * 视野外，用户点状态栏 chip / 通知跳过去后左侧看不出变化。这里补一次「滚到行」，
+   * 并把目标行尽量滚到列表垂直居中（见 `scrollSessionRowIntoView`）。
    *
    * ## 时序与退让
    *

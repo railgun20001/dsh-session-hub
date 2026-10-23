@@ -5,7 +5,7 @@
  *
  * 被测模块不碰 React / Cordis / 真实 DOM，只操作「文档桩」：
  * 断言的是外部可见行为——按 `data-row-key` 找对行、找错行时返回 null、
- * 滚动参数与官方 reveal 一致（`block: "nearest"`），以及一切异常都被吞掉。
+ * 滚动参数为垂直居中（`block: "center"`），以及一切异常都被吞掉。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -100,14 +100,14 @@ test('owningWorkspaceIdOf 对缺失/异形快照返回 null（保留「不知道
   assert.equal(owningWorkspaceIdOf({ items: [{ sessionIds: null }, { workspaceId: 7, sessionIds: ['a'] }] }, 'a'), null)
 })
 
-test('scrollSessionRowIntoView 命中会话行时只滚它，参数与官方 reveal 一致', () => {
+test('scrollSessionRowIntoView 命中会话行时只滚它，参数为垂直居中', () => {
   const session = row('session:s1')
   const workspace = row('workspace:w1')
   const hit = scrollSessionRowIntoView(docOf([workspace, session]), 's1', {
     workspaces: { items: [{ workspaceId: 'w1', sessionIds: ['s1'] }] },
   })
   assert.equal(hit, 'session')
-  assert.deepEqual(session.calls, [{ block: 'nearest' }])
+  assert.deepEqual(session.calls, [{ block: 'center' }])
   assert.deepEqual(workspace.calls, [], '找到会话行时不应再碰分组行')
 })
 
@@ -117,7 +117,7 @@ test('会话行不在 DOM（分组折叠）时退化滚动到所属工作区分�
     workspaces: { items: [{ workspaceId: 'w1', sessionIds: ['s1'] }] },
   })
   assert.equal(hit, 'workspace')
-  assert.deepEqual(workspace.calls, [{ block: 'nearest' }])
+  assert.deepEqual(workspace.calls, [{ block: 'center' }])
 })
 
 test('会话行与分组行都找不到时返回 null，且不抛', () => {

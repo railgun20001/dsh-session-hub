@@ -812,7 +812,7 @@ test('点通知跳转后，左侧会话列表滚动到对应会话行', async ()
     await settle()
 
     assert.deepEqual(opened, ['s1'], '跳转本身照常发生')
-    assert.deepEqual(target.calls, [{ block: 'nearest' }], '列表应滚到该会话行（与官方 reveal 同参数）')
+    assert.deepEqual(target.calls, [{ block: 'center' }], '列表应把该会话行滚到垂直居中')
   } finally {
     harness.dispose()
     harness.restore()
@@ -836,7 +836,7 @@ test('目标行稍后才渲染（React 异步提交）时，揭示逻辑会继�
     harness.state.notifications[0].onclick()
     await new Promise((resolve) => setTimeout(resolve, 150))
 
-    assert.deepEqual(target.calls, [{ block: 'nearest' }], '应在行渲染出来的那一帧滚过去')
+    assert.deepEqual(target.calls, [{ block: 'center' }], '应在行渲染出来的那一帧滚过去')
   } finally {
     clearTimeout(timer)
     harness.dispose()
@@ -862,7 +862,7 @@ test('会话行被分组折叠隐藏时，退化滚动到所属工作区分组�
     harness.state.notifications[0].onclick()
     await settle()
 
-    assert.deepEqual(groupRow.calls, [{ block: 'nearest' }], '会话行不存在时应滚到它所属的分组行')
+    assert.deepEqual(groupRow.calls, [{ block: 'center' }], '会话行不存在时应滚到它所属的分组行')
   } finally {
     harness.dispose()
     harness.restore()
@@ -922,7 +922,7 @@ test('诊断入口可单独验证列表揭示（不跳转）', async () => {
     await settle()
     const api = globalThis.__DSH_SESSION_HUB__
     assert.equal(api.revealSessionRow('s1'), 'session')
-    assert.deepEqual(target.calls, [{ block: 'nearest' }])
+    assert.deepEqual(target.calls, [{ block: 'center' }])
     assert.equal(api.revealSessionRow('missing'), null)
   } finally {
     harness.dispose()
