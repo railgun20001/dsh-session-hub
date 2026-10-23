@@ -21,6 +21,19 @@
  */
 
 /**
+ * 极简文案函数工厂：只在 locale 服务缺失时使用。
+ *
+ * @param {object} dict 键 → 文案。
+ * @returns {(key: string, params?: object) => string} 文案函数。
+ */
+function createFallbackT(dict) {
+  return (key, params) => {
+    const text = dict[key] ?? key
+    return params === undefined ? text : text.replace(/\{(\w+)\}/g, (match, name) => String(params[name] ?? match))
+  }
+}
+
+/**
  * 创建状态栏组件。
  * @param {object} React React 运行时（由客户端模块表提供）。
  * @param {{
@@ -49,16 +62,7 @@ function createSessionHubRail(React, deps, variant = 'header') {
     'state.unread': '待查看',
   }
 
-  /**
-   * 极简文案函数（只在 locale 服务缺失时使用）。
-   * @param {string} key 文案键。
-   * @param {object} [params] 插值参数。
-   * @returns {string} 文案。
-   */
-  const fallbackT = (key, params) => {
-    const text = FALLBACK[key] ?? key
-    return params === undefined ? text : text.replace(/\{(\w+)\}/g, (match, name) => String(params[name] ?? match))
-  }
+  const fallbackT = createFallbackT(FALLBACK)
 
   /** 没有插槽钩子时的安全回落（只会在测试或异常组合里用到）。 */
   const useEmptySessions = () => EMPTY_LIST
@@ -174,5 +178,91 @@ function createSessionHubRail(React, deps, variant = 'header') {
       role: 'group',
       'aria-label': rows.length === 0 ? t('idle') : t('aria', { count: rows.length }),
     }, children)
+  }
+}
+
+/**
+ * 创建「会话行悬停卡片里的失败提示」组件。
+ *
+ * ## 为什么需要它
+ *
+ * 侧栏会话行首那个圆点由官方 ui-workspace / ui-session 决定，只有四种：
+ * 等待交互（黄）、运行中（蓝）、未读完成（绿）、空闲（不画）。它**没有「失败」态**，
+ * 而 ui-session 在「running → 停止」时一律把会话记成 `completionUnread`，于是
+ * **一轮因报错/中断结束的会话，行首也会显示成绿色的「已完成」**。
+ *
+ * 插件不能改写官方行状态机（`sidebar.session.row.leading` 只在空闲时才轮到插件渲染），
+ * 所以这里用我们能控制的最近一个位置把真相补上：`sidebar.session.row.hover` 是行悬停
+ * 卡片的内容位（list 插槽），在这里加一行红色提示，鼠标停在行上就能看到
+ * 「本轮失败 / 本轮中断」，不会与官方绿点打架，也不去碰别人的 DOM。
+ *
+ * ## 数据来源
+ *
+ * 只读插槽标准 props：`useSessions`（会话列表快照）与 `t`；再加本插件自己的
+ * 「已确认报错」表（`deps.acks`）。判据与状态栏完全一致（`failureKindOf`）。
+ *
+ * @param {object} React React 运行时。
+ * @param {{ acks: { subscribe: (listener: () => void) => () => void, getSnapshot: () => object } }} deps
+ *   本插件的确认表。
+ * @returns {Function} React 函数组件。
+ */
+function createSessionHubRowHint(React, deps) {
+  const h = React.createElement
+  const EMPTY_LIST = { byId: {}, projectionsBySession: {} }
+  const useEmptySessions = () => EMPTY_LIST
+  const fallbackT = createFallbackT({
+    'row.failed': '本轮失败',
+    'row.interrupted': '本轮中断',
+    'row.hint': '该会话最后一轮没有正常结束',
+  })
+
+  /**
+   * 订阅「已确认报错」表。
+   * @param {object} store 快照仓库。
+   * @returns {object} 当前确认表。
+   */
+  function useAcks(store) {
+    if (typeof React.useSyncExternalStore === 'function') {
+      return React.useSyncExternalStore(store.subscribe, store.getSnapshot)
+    }
+    const [, force] = React.useState(0)
+    React.useEffect(() => store.subscribe(() => force((n) => n + 1)), [store])
+    return store.getSnapshot()
+  }
+
+  const CSS = [
+    '.dsh-hub-hint{display:flex;align-items:center;gap:6px;min-width:0;font:inherit;font-size:12px;line-height:1.3;color:var(--dsw-alias-label-primary)}',
+    '.dsh-hub-hint__dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--dsw-alias-state-error-primary)}',
+    '.dsh-hub-hint__text{flex:none}',
+    '.dsh-hub-hint__detail{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--dsw-alias-label-secondary)}',
+  ].join('')
+
+  return function SessionHubRowHint(props) {
+    const t = typeof props?.t === 'function' ? props.t : fallbackT
+    const useSessions = typeof props?.useSessions === 'function' ? props.useSessions : useEmptySessions
+    const list = useSessions((value) => value)
+    const ackErrors = useAcks(deps.acks)
+    const sessionId = typeof props?.sessionId === 'string' ? props.sessionId : undefined
+    if (sessionId === undefined) return null
+
+    const projection = projectionOf(list, sessionId)
+    const acked = Number.isInteger(ackErrors[sessionId]) ? ackErrors[sessionId] : -1
+    const kind = failureKindOf(projection, acked)
+    if (kind === null) return null
+
+    const label = t(kind === 'interrupted' ? 'row.interrupted' : 'row.failed')
+    const detail = typeof projection?.code === 'string' && projection.code !== '' ? projection.code : ''
+
+    return h('div', {
+      className: 'dsh-hub-hint',
+      'data-dsh-session-hub-hint': kind,
+      title: t('row.hint'),
+      role: 'status',
+    }, [
+      h('style', { key: 'style' }, CSS),
+      h('span', { key: 'dot', className: 'dsh-hub-hint__dot', 'aria-hidden': 'true' }),
+      h('span', { key: 'text', className: 'dsh-hub-hint__text' }, label),
+      detail === '' ? null : h('span', { key: 'detail', className: 'dsh-hub-hint__detail' }, detail),
+    ])
   }
 }

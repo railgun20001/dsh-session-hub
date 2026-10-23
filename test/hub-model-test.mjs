@@ -10,6 +10,7 @@ import {
   aggregateTaskbarState,
   currentSessionIdOf,
   deriveHubRows,
+  failureKindOf,
   isUnackedFailure,
   normalizeAckErrors,
   projectionOf,
@@ -127,13 +128,25 @@ test('已确认的报错不再显示，新 seq 会重新出现', () => {
   assert.equal(isUnackedFailure(outcome(7, 'interrupted'), 6), true)
 })
 
-test('任务栏聚合遵守红 > 黄 > 绿 > 无', () => {
+test('任务栏聚合遵守红 > 黄 > 绿 > 无，且运行中不点灯', () => {
   assert.equal(aggregateTaskbarState([]), 'none')
   assert.equal(aggregateTaskbarState([{ state: 'unread' }]), 'green')
-  assert.equal(aggregateTaskbarState([{ state: 'running' }]), 'green')
+  // 运行中是常态：任务栏不点灯，避免常亮绿灯盖掉红/黄提示。
+  assert.equal(aggregateTaskbarState([{ state: 'running' }]), 'none')
+  assert.equal(aggregateTaskbarState([{ state: 'running' }, { state: 'unread' }]), 'green')
   assert.equal(aggregateTaskbarState([{ state: 'running' }, { state: 'answer' }]), 'yellow')
   assert.equal(aggregateTaskbarState([{ state: 'answer' }, { state: 'error' }]), 'red')
   assert.equal(aggregateTaskbarState([{ state: 'error' }, { state: 'unread' }]), 'red')
+  assert.equal(aggregateTaskbarState([{ state: 'running' }, { state: 'answer' }, { state: 'error' }]), 'red')
+})
+
+test('失败类别：区分 error 与 interrupted，并按确认位过滤', () => {
+  assert.equal(failureKindOf(outcome(3, 'error'), -1), 'error')
+  assert.equal(failureKindOf(outcome(3, 'interrupted'), -1), 'interrupted')
+  assert.equal(failureKindOf(outcome(3, 'completed'), -1), null)
+  assert.equal(failureKindOf(outcome(3, 'error'), 3), null)
+  assert.equal(failureKindOf(null, -1), null)
+  assert.equal(failureKindOf(undefined, -1), null)
 })
 
 test('投影优先从 projectionsBySession 读，兼容单行 projectionValues', () => {

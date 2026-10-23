@@ -22,11 +22,14 @@
  * 注意这只决定**显示顺序**；一个会话归到哪一类仍由 `deriveHubRows` 的判定顺序决定
  * （同时在等你回答又还没确认上一轮失败时，按「等待回答」显示，因为它更要求你动手）。
  *
- * 任务栏只取最高优先级的三色：
+ * 任务栏只点「需要你处理」的灯：
  *   - 有报错 → red
  *   - 否则有等待回答 → yellow
- *   - 否则有运行中或待查看 → green
+ *   - 否则有**待查看**（未读完成）→ green
  *   - 都没有 → none（清除覆盖图标）
+ *
+ * **运行中不点灯**：正在跑是常态，不需要你介入；把它点亮只会让任务栏一直是绿的，
+ * 反而盖掉真正的提示。运行中仍然出现在状态栏 chip 里（蓝色脉冲点）。
  *
  * @module dsh-session-hub/hub-model
  */
@@ -208,6 +211,9 @@ export function deriveHubRows({ list, statuses, ackErrors = {}, includeSubagents
 
 /**
  * 把状态栏行聚合为任务栏状态（红 > 黄 > 绿 > 无）。
+ *
+ * 绿只来自「待查看」（未读完成），**不含运行中**：运行中是常态，任务栏常亮绿灯
+ * 会盖掉真正需要你介入的红/黄提示。运行中仍然在状态栏 chip 里可见。
  * @param {Array<{state: string}>} rows 状态栏行。
  * @returns {'red'|'yellow'|'green'|'none'} 任务栏状态。
  */
@@ -215,8 +221,22 @@ export function aggregateTaskbarState(rows) {
   if (!Array.isArray(rows) || rows.length === 0) return 'none'
   if (rows.some((row) => row?.state === 'error')) return 'red'
   if (rows.some((row) => row?.state === 'answer')) return 'yellow'
-  if (rows.some((row) => row?.state === 'running' || row?.state === 'unread')) return 'green'
+  if (rows.some((row) => row?.state === 'unread')) return 'green'
   return 'none'
+}
+
+/**
+ * 判定某会话「尚未确认的失败」属于哪一类，供行内提示挑选文案。
+ *
+ * 与 {@link isUnackedFailure} 同判据，只是把布尔换成可读的类别：
+ * `error`（模型/工具报错）、`interrupted`（宿主异常退出后的合成收尾）。
+ * @param {object|null|undefined} projection 投影值。
+ * @param {number} ackedSeq 已确认到的 seq。
+ * @returns {'error'|'interrupted'|null} 失败类别；没有未确认失败时为 null。
+ */
+export function failureKindOf(projection, ackedSeq) {
+  if (!isUnackedFailure(projection, ackedSeq)) return null
+  return projection.outcome === 'interrupted' ? 'interrupted' : 'error'
 }
 
 /**

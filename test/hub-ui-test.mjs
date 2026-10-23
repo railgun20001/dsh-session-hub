@@ -15,7 +15,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { deriveHubRows, STATE_LABELS } from '../src/hub-model.js'
+import { deriveHubRows, failureKindOf, projectionOf, STATE_LABELS } from '../src/hub-model.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SOURCE = readFileSync(join(HERE, '..', 'src', 'hub-ui.js'), 'utf8')
@@ -46,6 +46,18 @@ function loadFactory() {
   return new Function('deriveHubRows', 'STATE_LABELS', `${SOURCE}\nreturn createSessionHubRail`)(
     deriveHubRows,
     STATE_LABELS,
+  )
+}
+
+/**
+ * 载入行悬停提示组件工厂。
+ * @returns {Function} createSessionHubRowHint。
+ */
+function loadHintFactory() {
+  // eslint-disable-next-line no-new-func
+  return new Function('projectionOf', 'failureKindOf', `${SOURCE}\nreturn createSessionHubRowHint`)(
+    projectionOf,
+    failureKindOf,
   )
 }
 
@@ -173,6 +185,39 @@ test('已确认的报错不再渲染 chip', () => {
   assert.equal(findNode(tree, (node) => typeof node.props?.className === 'string'
     && node.props.className.includes('dsh-hub__chip')), undefined)
   assert.match(collectText(tree).join('|'), /全部空闲/)
+})
+
+test('行悬停提示：只在有未确认失败时出现，区分失败与中断', () => {
+  const Hint = loadHintFactory()(reactStub(), {
+    acks: { subscribe: () => () => {}, getSnapshot: () => ({}) },
+  })
+  const list = {
+    byId: { bad: row('bad'), broken: row('broken'), ok: row('ok') },
+    projectionsBySession: {
+      bad: { values: { hubTurnOutcome: { outcome: 'error', seq: 5, turn: 1, time: 1, code: 'rate-limit', message: 'too many' } } },
+      broken: { values: { hubTurnOutcome: { outcome: 'interrupted', seq: 6, turn: 1, time: 1, code: null, message: null } } },
+      ok: { values: { hubTurnOutcome: { outcome: 'completed', seq: 7, turn: 1, time: 1, code: null, message: null } } },
+    },
+  }
+  const useSessions = (selector) => selector(list)
+
+  const failed = Hint({ sessionId: 'bad', useSessions })
+  assert.match(collectText(failed).join('|'), /本轮失败/)
+  assert.match(collectText(failed).join('|'), /rate-limit/)
+
+  const interrupted = Hint({ sessionId: 'broken', useSessions })
+  assert.match(collectText(interrupted).join('|'), /本轮中断/)
+
+  // 正常完成的会话不显示提示（否则绿点旁边会多出一条假警报）。
+  assert.equal(Hint({ sessionId: 'ok', useSessions }), null)
+  // 没有 sessionId 时不渲染。
+  assert.equal(Hint({ useSessions }), null)
+
+  // 已确认的失败不再提示。
+  const HintAcked = loadHintFactory()(reactStub(), {
+    acks: { subscribe: () => () => {}, getSnapshot: () => ({ bad: 5 }) },
+  })
+  assert.equal(HintAcked({ sessionId: 'bad', useSessions }), null)
 })
 
 test('chrome 变体带 fixed 顶栏类与菜单偏移 CSS', () => {

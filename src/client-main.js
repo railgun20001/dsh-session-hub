@@ -588,6 +588,9 @@ function apply(ctx) {
                 'state.error': '报错',
                 'state.running': '运行中',
                 'state.unread': '待查看',
+                'row.failed': '本轮失败',
+                'row.interrupted': '本轮中断',
+                'row.hint': '该会话最后一轮没有正常结束',
               },
               en: {
                 label: 'Sessions',
@@ -599,6 +602,9 @@ function apply(ctx) {
                 'state.error': 'Failed',
                 'state.running': 'Running',
                 'state.unread': 'Unread',
+                'row.failed': 'Last turn failed',
+                'row.interrupted': 'Last turn interrupted',
+                'row.hint': 'The last turn of this Session did not finish normally',
               },
             }), `${PLUGIN_ID}: locale`)
           } catch (error) {
@@ -623,7 +629,16 @@ function apply(ctx) {
             order: 5,
             locale: PLUGIN_ID,
           }, RailChrome))
-          ctx.logger?.info?.(`[${PLUGIN_ID}] 状态栏已注册到 conversation.header.leading + shell.overlay`)
+          // 会话行悬停卡片：补一行「本轮失败/中断」，解释官方行首那个绿色「已完成」点
+          // 为什么会出现在失败会话上（官方行状态机没有失败态，插件改不了行首点）。
+          const RowHint = createSessionHubRowHint(React, { acks })
+          scoped.slots.inject('sidebar.session.row.hover', () => scoped.slots.register({
+            name: 'sidebar.session.row.hover',
+            id: 'session-hub-failure',
+            order: 10,
+            locale: PLUGIN_ID,
+          }, RowHint))
+          ctx.logger?.info?.(`[${PLUGIN_ID}] 状态栏已注册到 conversation.header.leading + shell.overlay + sidebar.session.row.hover`)
         } catch (error) {
           console.warn(`[${PLUGIN_ID}] 注册状态栏失败`, error)
         }

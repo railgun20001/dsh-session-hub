@@ -18,7 +18,7 @@
 | **报错** `error` | 宿主投影 `hubTurnOutcome.outcome ∈ error / interrupted`，且该 `seq` 未被确认 | 🔴 红点 + 「报错」 | 红（最高） |
 | **等待回答** `answer` | `uiSession.sessionStatus.pendingInteraction.kind ∈ approval / plan-review / question` | 🟡 黄点 + 「等待回答」 | 黄（无红灯时） |
 | **待查看** `unread` | `sessionStatus.completionUnread === true`（原生「未读完成」绿点） | 🟢 绿点 + 「待查看」 | 绿（无红/黄时） |
-| **运行中** `running` | `sessionStatus.running` 或会话行 `running` | 🔵 蓝点 + 「运行中」 | 绿（无红/黄时） |
+| **运行中** `running` | `sessionStatus.running` 或会话行 `running` | 🔵 蓝点 + 「运行中」 | **不点灯** |
 
 - **状态栏 chip 的显示顺序 = 颜色顺序：红 > 黄 > 绿 > 蓝**（`STATE_ORDER`），同一类里更新时间新的靠前。
   最需要你介入的排最前，正在跑的排最后——所以默认只显示的 3 条永远不会被「运行中」占位。
@@ -30,10 +30,52 @@
   不会永远亮着；同一个会话出现新的报错会重新亮起。
 - 「待查看」直接复用原生 `completionUnread`，打开会话即熄灭。
 
-任务栏聚合规则：只要有一个报错就是红灯；否则有等待回答就是黄灯；否则有运行中或待查看
+任务栏聚合规则：只要有一个报错就是红灯；否则有等待回答就是黄灯；否则有**待查看**
 就是绿灯；都没有就清除覆盖图标。
 
+> **运行中不点灯**。正在跑是常态，不需要你介入；如果运行中也点亮任务栏，绿灯几乎
+> 常亮，真正的红/黄提示反而被盖住。运行中仍然出现在状态栏 chip 里（蓝色脉冲点）。
+
 ---
+
+## 1.1 会话行状态点：现状与同步
+
+侧栏每行行首那个圆点是**官方** ui-workspace 画的，插件改不了；这里把它的来源列清楚，
+并说明本插件在哪一层补上「失败」这个官方缺失的语义。
+
+### 官方行首圆点（`SessionStatusDots` → `StateDot`）
+
+判定顺序（`ui-workspace` 的 `sessionStatuses`，取第一个作为行首点）：
+
+| 优先级 | 条件 | 圆点 | 说明 |
+|---|---|---|---|
+| 1 | `pendingInteraction.kind` ∈ approval / plan-review / question | 🟡 warning | 等你批/等你答 |
+| 2 | `sessionStatus.running`（含子代理运行） | 🔵 ongoing | 正在跑 |
+| 3 | `completionUnread === true` | 🟢 done | 「已完成未查看」 |
+| 4 | 以上都不是 | — | 空闲；此时行首位置才轮到插件插槽 `sidebar.session.row.leading` |
+
+### 已知错位：失败/中断的会话也显示绿色「已完成」
+
+`ui-session` 的 `observeRunning` 在「running → 停止」时**无条件**把会话记成
+`completionUnread`，不区分这一轮是正常完成、报错还是中断。于是：
+
+- 一轮因 503 / 中断结束的会话 → 行首照样是绿点「已完成」；
+- 官方行状态机里**没有 error 态**，插件也无法覆盖非空闲行首（`sidebar.session.row.leading`
+  只在第 4 档才渲染）。
+
+### 本插件的同步方式
+
+- **不改官方圆点**（改不了，也不该去碰别人的 DOM）；
+- 在**我们能控制的最近位置**补上真相：`sidebar.session.row.hover`（行悬停卡片的内容位，
+  list 插槽）里加一行红色提示——`本轮失败` / `本轮中断`，带投影里的 `code`（若有）；
+- 判据与状态栏完全一致（`failureKindOf`），已确认的失败不再提示；
+- 打开该会话即成为 main view，官方 `completionUnread` 会清掉，绿点自然消失。
+
+> 想让**行首圆点本身**变成红色「失败」，需要上游在 `ui-session` 里区分失败结局
+> （或给行状态机加 error 态）——这不是插件能做的，本插件只负责不再让用户被绿点误导。
+
+---
+
 
 ## 2. 界面位置
 
@@ -52,6 +94,10 @@
 - chip 横向排列，超出宽度可横向滚动（隐藏滚动条），不挤压标题；
 - 全部空闲时显示一个低调的「全部空闲」；没有可用会话（或插槽钩子缺失）时也不会报错；
 - 视觉只用 `--dsw-alias-*` / 设计系统 token，浅色/深色主题都跟随宿主。
+
+**会话行悬停卡片**：另外注册到 `sidebar.session.row.hover`（list 插槽），只在某行
+「最后一轮失败/中断且未确认」时追加一行红色提示（`本轮失败` / `本轮中断` + `code`），
+用来解释官方行首那个绿色「已完成」点（见 1.1 节）。
 
 点击 chip 的行为：确认该条目的报错 → `uiWorkspace.openSession(sessionId)`。
 **chip 点击不请求窗口前置**：窗口本来就在前台，而且这样可以完全避免触碰窗口状态——
@@ -124,7 +170,7 @@ plugins/dsh-session-hub/
 │   ├── hub-ui.js            顶部状态栏 React 组件
 │   └── client-main.js       接线：服务 → 模型 → 通知 / 状态栏 / 任务栏
 ├── build/bundle.mjs         把四个源文件内联成单文件浏览器 bundle（--check 校验）
-├── test/                    65 个用例
+├── test/                    71 个用例
 ├── locale/{zh,en}.json      插件管理器的标题与描述
 ├── icon.svg                 插件图标
 └── cordis.patch.yml         bundle patch：插入 session-hub 行
@@ -197,7 +243,7 @@ __DSH_SESSION_HUB__.setConfig({ silenceAllWhenFocused: true })
 
 ```powershell
 cd C:\work\my\dsh\plugins\dsh-session-hub
-npm run check      # 1) 校验 lib/client.js 与源码一致  2) 跑 65 个用例
+npm run check      # 1) 校验 lib/client.js 与源码一致  2) 跑 71 个用例
 ```
 
 DSH 窗口 DevTools 控制台：
@@ -225,11 +271,13 @@ Invoke-RestMethod -Uri http://127.0.0.1:14489/dsh-session-hub/debug -Method POST
 
 手工验收：
 
-1. 在 A 会话发一个长任务，切到 B 会话 / 别的应用 → 任务栏绿灯；
-2. 任务完成后 → 弹「DSH · 任务完成」，状态栏出现绿点「待查看」，点 chip / 通知回到 A；
-3. 让一轮失败 → 弹「DSH · 任务失败」，状态栏红点「报错」，任务栏变红（优先级高于黄/绿）；
+1. 在 A 会话发一个长任务，切到 B 会话 / 别的应用 → **任务栏不点灯**（运行中不亮），
+   状态栏出现蓝色脉冲点「运行中」；
+2. 任务完成后 → 弹「DSH · 任务完成」，状态栏出现绿点「待查看」，任务栏转绿，点 chip / 通知回到 A；
+3. 让一轮失败 → 弹「DSH · 任务失败」，状态栏红点「报错」，任务栏变红（优先级高于黄/绿），
+   把鼠标停在该会话行上，悬停卡片里出现红点「本轮失败」/「本轮中断」；
 4. 触发提问 / 审批 → 弹「DSH · 需要你回应」，状态栏黄点「等待回答」，任务栏变黄；
-5. 点击红点条目 → 报错确认，红点与任务栏红灯消失。
+5. 点击红点条目 → 报错确认，红点与任务栏红灯消失，行悬停提示同时消失。
 
 ---
 
