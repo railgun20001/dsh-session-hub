@@ -37,7 +37,7 @@ function createFallbackT(dict) {
  * 创建状态栏组件。
  * @param {object} React React 运行时（由客户端模块表提供）。
  * @param {{
- *   openSession: (sessionId: string) => void,
+ *   openSession: (sessionId: string, options?: { raise?: boolean }) => void,
  *   ackError: (sessionId: string, seq: number|null) => void,
  *   acks: { subscribe: (listener: () => void) => () => void, getSnapshot: () => object },
  *   unread?: { subscribe: (listener: () => void) => () => void, getSnapshot: () => object },

@@ -2,8 +2,9 @@
  * dsh-session-hub —— 通知决策引擎（纯逻辑，零依赖）
  *
  * 这一层只做一件事：把「会话事实快照」折叠成「本次应当弹出的通知列表」。
- * 它不碰 DOM、不碰 Notification、不碰 Cordis，因此可以在 Node 里直接单测
- * （见 test/notify-core-test.mjs）。
+ * 它不碰 DOM、不碰 Notification、不碰 Cordis，因此可以在 Node 里直接单测。
+ * 用例走真实 bundle：`test/client-half-test.mjs` 用桩浏览器环境加载 `lib/client.js`，
+ * 逐条断言「哪种状态变化该弹哪条通知」与 `completions` 的边沿。
  *
  * ## 事实来源（客户端半从 DSH 受支持服务读取）
  *
