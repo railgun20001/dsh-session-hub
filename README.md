@@ -7,7 +7,8 @@
 - **Windows 通知**：对话状态发生变化（完成 / 失败 / 需要你回答）时弹系统通知，
   点击通知跳回对应对话并尽量把 DSH 窗口提到前台；
 - **任务栏状态点**：用 `ITaskbarList3.SetOverlayIcon` 在任务栏的 DSH 图标上画
-  红 / 黄 / 绿点，优先级 `红 > 黄 > 绿`，窗口最小化或在别的应用前面时也能看到。
+  红 / 黄 / 绿点，优先级 `红 > 黄 > 绿`，窗口最小化或在别的应用前面时也能看到
+  ——包括**正在看的这个对话在后台跑完**（官方不会给主视图会话点亮，插件自己补，见 1.2 节）。
 
 ---
 
@@ -17,7 +18,7 @@
 |---|---|---|---|
 | **报错** `error` | 宿主投影 `hubTurnOutcome.outcome ∈ error / interrupted`，且该 `seq` 未被确认 | 🔴 红点 + 「报错」 | 红（最高） |
 | **等待回答** `answer` | `uiSession.sessionStatus.pendingInteraction.kind ∈ approval / plan-review / question` | 🟡 黄点 + 「等待回答」 | 黄（无红灯时） |
-| **待查看** `unread` | `sessionStatus.completionUnread === true`（原生「未读完成」绿点） | 🟢 绿点 + 「待查看」 | 绿（无红/黄时） |
+| **待查看** `unread` | `sessionStatus.completionUnread === true`（原生「未读完成」绿点）**或**本插件补记的「后台完成」 | 🟢 绿点 + 「待查看」 | 绿（无红/黄时） |
 | **运行中** `running` | `sessionStatus.running` 或会话行 `running` | 🔵 蓝点 + 「运行中」 | **不点灯** |
 
 - **状态栏 chip 的显示顺序 = 颜色顺序：红 > 黄 > 绿 > 蓝**（`STATE_ORDER`），同一类里更新时间新的靠前。
@@ -28,7 +29,8 @@
 - 空白「新会话」占位行与子代理会话（`origin: subagent`）不进入状态栏，也不通知。
 - 「报错」在**点击该条目**或**正看着该会话且窗口聚焦**时自动确认（记下 `seq`），
   不会永远亮着；同一个会话出现新的报错会重新亮起。
-- 「待查看」直接复用原生 `completionUnread`，打开会话即熄灭。
+- 「待查看」优先复用原生 `completionUnread`，打开会话即熄灭；**当前对话在窗口不在前台时
+  跑完的那一轮由插件自己补记**（见 1.2 节），回到前台并正在看它时熄灭。
 
 任务栏聚合规则：只要有一个报错就是红灯；否则有等待回答就是黄灯；否则有**待查看**
 就是绿灯；都没有就清除覆盖图标。
@@ -73,6 +75,29 @@
 
 > 想让**行首圆点本身**变成红色「失败」，需要上游在 `ui-session` 里区分失败结局
 > （或给行状态机加 error 态）——这不是插件能做的，本插件只负责不再让用户被绿点误导。
+
+---
+
+## 1.2 当前对话在后台跑完：为什么绿点要插件自己补
+
+官方 `ui-session` 的 `observeRunning` 只在「running → 停止」且**该会话不是主视图**
+（`retainedBy.mainView === 0`）时才记 `completionUnread`，`reconcileStatus` 还会对主视图
+会话主动清掉它。于是最常见的等任务姿势——**正开着这个对话、切去别的应用干活、任务在
+后台跑完**——在官方状态里是「什么都没发生」：没有绿点、没有绿灯、状态栏也不会出现条目。
+
+插件的补法是**同一份边沿、两份用途**（`planNotifications` 的 `completions` 返回值）：
+
+| 观测事实 | 窗口在前台 | 窗口不在前台（被盖住 / 最小化 / 别的虚拟桌面） |
+|---|---|---|
+| 当前对话的回合结束（`completed` / `max-tokens`） | 静默（结果就在眼前），不点灯 | 弹「DSH · 任务完成」+ 补记「待查看」→ **绿点 + 任务栏绿灯** |
+
+- 「窗口在不在前台」由 `document.visibilityState === "visible"` 且 `document.hasFocus()`
+  判定（`requireVisibleForFocus` 控制前者），一次观察只判定一次，状态栏 / 通知 / 记账同源；
+- 记账落盘在 `localStorage` 的 `dsh-session-hub/local-unread-v1`（`{ [sessionId]: seq }`），
+  刷新页面后绿点仍在；
+- 熄灭条件：窗口回到前台且**正在看这个会话**，或用户点了它的通知 / 状态栏 chip
+  （`openSession` 即视为已查看）。窗口焦点变化会主动触发一次观察，不用等下一次会话推送；
+- 失败 / 中断不走这条路：它们本来就有「报错」红灯（红 > 绿），不需要再补绿点。
 
 ---
 
@@ -130,6 +155,10 @@
 **不会**为「正在思考 / 正在执行工具」这类实时活动弹通知；这正是多数通知插件最吵的地方。
 「开始运行」默认也不通知——通常是你自己刚发的消息，没有任何新信息值得打扰。
 
+**窗口不在前台时，「当前对话」跑完也照常弹**：静默只发生在「窗口在前台**且**正在看这个
+会话」的时候（`silenceCurrentWhenFocused`）。所以切去别的应用干活、任务在后台跑完 →
+通知 + 任务栏绿灯 + 状态栏「待查看」三件一起到（见 1.2 节）。
+
 点击通知：`openSession` 跳转 + 宿主半前置窗口。每条通知的 `tag` 是
 `dsh-session-hub:<会话 id>#<事件键>`——**一次事件一个唯一 tag，永不与别的通知共用**。
 多标签页共享 `localStorage` 时同一事件只弹一条。
@@ -175,8 +204,10 @@ Electron 的 `BrowserWindow.setOverlayIcon` 没有暴露给渲染进程，preloa
 - 只有桌面外壳（`location.protocol === 'dsh-app:'`）会发任务栏请求；浏览器里的 Web 页面
   不会互相抢状态。
 
-**颜色优先级**：`red`（任一报错）> `yellow`（任一等待回答）> `green`（任一运行中或待查看）
-> `none`。
+**颜色优先级**：`red`（任一报错）> `yellow`（任一等待回答）> `green`（任一待查看）> `none`。
+
+绿灯的「待查看」有两个来源：官方 `completionUnread`（非主视图会话），以及插件为
+**当前对话在窗口不在前台时跑完**那一轮补的记账（官方对主视图会话永不置位，见 1.2 节）。
 
 ---
 
@@ -195,7 +226,7 @@ plugins/dsh-session-hub/
 │   ├── hub-ui.js            顶部状态栏 React 组件
 │   └── client-main.js       接线：服务 → 模型 → 通知 / 状态栏 / 任务栏
 ├── build/bundle.mjs         把五个源文件内联成单文件浏览器 bundle（--check 校验）
-├── test/                    89 个用例
+├── test/                    98 个用例
 ├── locale/{zh,en}.json      插件管理器的标题与描述
 ├── icon.svg                 插件图标
 └── cordis.patch.yml         bundle patch：插入 session-hub 行
@@ -203,7 +234,10 @@ plugins/dsh-session-hub/
 
 **为什么事件要自己算边沿**：DSH 给客户端的两路数据都是「当前状态」而不是事件流
 （`running` 是布尔、`pendingInteraction` 是当前值、投影是「最后一个回合的结局」）。
-通知必须由状态边沿推导，不能每收到一次推送就弹一次。
+通知必须由状态边沿推导，不能每收到一次推送就弹一次。边沿只有一份实现
+（`src/notify-core.js` 的 `planNotifications`），它同时产出两样东西：**该弹哪些通知**
+（`notifications`）和**这一轮真的结束了哪些会话**（`completions`）。后者与通知开关、
+静默无关，用来补官方缺失的「待查看」绿点（见 1.2 节）。
 
 **为什么失败要靠宿主投影**：客户端拿不到「上一轮为什么结束」。`turn/end` 事件带
 `reason.kind`，但只在会话被打开（retain）时才有事件流。会话投影是受支持的正解：
@@ -261,13 +295,16 @@ __DSH_SESSION_HUB__.getConfig()
 __DSH_SESSION_HUB__.setConfig({ silenceAllWhenFocused: true })
 ```
 
+> `enabled` / `onComplete` 只关**通知**，不影响绿点与任务栏：绿点补记是状态事实
+> （「这一轮跑完了、你还没看」），不是打扰。
+
 ---
 
 ## 8. 诊断与验证
 
 ```powershell
 cd C:\work\my\dsh\plugins\dsh-session-hub
-npm run check      # 1) 校验 lib/client.js 与源码一致  2) 跑 89 个用例
+npm run check      # 1) 校验 lib/client.js 与源码一致  2) 跑 98 个用例
 ```
 
 DSH 窗口 DevTools 控制台：
@@ -275,10 +312,12 @@ DSH 窗口 DevTools 控制台：
 ```js
 __DSH_SESSION_HUB__.inspect()
 // → { version, sessions, uiSession, uiWorkspace, permission, statusRows, taskbarState,
-//     desktopShell, hostHalf, ... }
+//     localUnread, focused, desktopShell, hostHalf, ... }
 
 __DSH_SESSION_HUB__.getRows()          // 当前状态栏行
 __DSH_SESSION_HUB__.getTaskbarState()  // red / yellow / green / none
+__DSH_SESSION_HUB__.getLocalUnread()   // { [sessionId]: seq }：补记的「后台完成、尚未查看」
+__DSH_SESSION_HUB__.clearLocalUnread() // 手动清掉全部补记（绿灯随之熄灭）
 __DSH_SESSION_HUB__.setTaskbarState('red')    // 手动试任务栏红点（排障）
 __DSH_SESSION_HUB__.setTaskbarState('none')   // 清掉
 __DSH_SESSION_HUB__.testNotification() // 弹一条测试通知，点它应跳回当前会话
@@ -287,6 +326,10 @@ __DSH_SESSION_HUB__.clearNotifyLog()    // 清空落地日志
 __DSH_SESSION_HUB__.revealSessionRow('session-…') // 'session' / 'workspace' / null：验证左侧列表能滚到该会话行（不跳转）
 __DSH_SESSION_HUB__.pingHost()         // 'present' / 'absent' / 'unknown'
 ```
+
+排障「窗口在不在前台」：把 DSH 切到后台，在控制台看 `__DSH_SESSION_HUB__.inspect().focused`
+——它必须变成 `false`。如果它仍是 `true`，说明宿主的焦点判定与浏览器语义不一致，静默与
+绿点都会跟着错（这种情况请把 `focused` 的值和窗口状态一起反馈）。
 
 宿主半只读诊断：
 
@@ -301,11 +344,15 @@ Invoke-RestMethod -Uri http://127.0.0.1:14489/dsh-session-hub/debug -Method POST
 1. 在 A 会话发一个长任务，切到 B 会话 / 别的应用 → **任务栏不点灯**（运行中不亮），
    状态栏出现蓝色脉冲点「运行中」；
 2. 任务完成后 → 弹「DSH · 任务完成」，状态栏出现绿点「待查看」，任务栏转绿，点 chip / 通知回到 A；
-3. 让一轮失败 → 弹「DSH · 任务失败」，状态栏红点「报错」，任务栏变红（优先级高于黄/绿），
+3. **当前对话本身**发一个长任务，然后切到别的应用（窗口不置顶，但 A 仍是主视图）→
+   任务跑完必须同时出现：系统通知「DSH · 任务完成」、任务栏图标**绿点**、状态栏「待查看」；
+   切回窗口（且仍在看 A）后绿点与绿灯立刻熄灭；若改成点通知回来，也应当熄灭；
+   验证 `__DSH_SESSION_HUB__.inspect().focused` 在切走时是 `false`、切回时是 `true`；
+4. 让一轮失败 → 弹「DSH · 任务失败」，状态栏红点「报错」，任务栏变红（优先级高于黄/绿），
    把鼠标停在该会话行上，悬停卡片里出现红点「本轮失败」/「本轮中断」；
-4. 触发提问 / 审批 → 弹「DSH · 需要你回应」，状态栏黄点「等待回答」，任务栏变黄；
-5. 点击红点条目 → 报错确认，红点与任务栏红灯消失，行悬停提示同时消失。
-6. 制造一个长列表（展开很多会话 / 把列表滚到远处），点击状态栏 chip 或通知跳转 →
+5. 触发提问 / 审批 → 弹「DSH · 需要你回应」，状态栏黄点「等待回答」，任务栏变黄；
+6. 点击红点条目 → 报错确认，红点与任务栏红灯消失，行悬停提示同时消失。
+7. 制造一个长列表（展开很多会话 / 把列表滚到远处），点击状态栏 chip 或通知跳转 →
    **左侧列表自动滚到目标会话行**；目标所在分组折叠时，至少滚到它所属的分组标题。
 
 ---
@@ -320,6 +367,12 @@ Invoke-RestMethod -Uri http://127.0.0.1:14489/dsh-session-hub/debug -Method POST
 - **第一次点通知可能略慢**：worker 需要先编译一次 C#（本机实测 5.9–9.6 秒，取决于杀软）。
   通知一弹出就会预热；编译期间点击不会丢，指令排队、编译完立即执行。
 - **任务栏点只在桌面端**：Web 浏览器页面没有任务栏按钮，`desktopShell=false` 时不会上报。
+- **「窗口在不在前台」用浏览器语义判定**：`document.visibilityState === "visible"` 且
+  `document.hasFocus()`（Electron 的窗口失活会同时让 `hasFocus()` 变 `false`，被完全遮挡
+  时 `visibilityState` 可能变 `hidden`）。若上游换了外壳实现导致焦点语义漂移，通知静默与
+  绿点补记都会跟着错——`__DSH_SESSION_HUB__.inspect().focused` 是这条链路的体检点。
+- **补记的「待查看」不会自动过期**：与官方 `completionUnread` 同语义，需要你打开那个会话
+  （或点它的通知 / chip）才熄灭；窗口回到前台并正在看它时会自动清掉。
 - **安装前的历史冷会话**不显示报错：投影检查点按 (sessionId, key) 落盘，本插件注册前
   结束的冷会话没有该键的行，需等该会话被打开一次（全量重折叠）才补齐。
 - **报错不会自动过期**：需要点击条目或打开该会话确认；这是刻意设计——失败值得你看一眼。

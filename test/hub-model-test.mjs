@@ -11,8 +11,10 @@ import {
   currentSessionIdOf,
   deriveHubRows,
   failureKindOf,
+  hasLocalUnread,
   isUnackedFailure,
   normalizeAckErrors,
+  normalizeLocalUnread,
   projectionOf,
   STATE_ORDER,
 } from '../src/hub-model.js'
@@ -170,4 +172,46 @@ test('确认表归一化只保留合法整数', () => {
   assert.deepEqual(normalizeAckErrors({ a: 3, b: -1, c: 'x', d: 1.5 }), { a: 3 })
   assert.deepEqual(normalizeAckErrors(null), {})
   assert.deepEqual(normalizeAckErrors([1, 2]), {})
+})
+
+test('当前会话在后台完成时，靠 localUnread 补出「待查看」（官方 completionUnread 永不置位）', () => {
+  // 主视图会话（retainedBy.mainView = 1）：官方 completionUnread 一定不是 true。
+  const list = listOf([row('s1', { retainedBy: { mainView: 1 } })], { s1: outcome(9, 'completed') })
+  const statuses = new Map([['s1', { completionUnread: false, running: false }]])
+
+  assert.deepEqual(deriveHubRows({ list, statuses }), [], '没有补记时不会凭空出现绿点')
+  const rows = deriveHubRows({ list, statuses, localUnread: { s1: 9 } })
+  assert.deepEqual(rows.map((item) => [item.id, item.state]), [['s1', 'unread']])
+  // 聚合到任务栏就是绿灯（没有红/黄时）。
+  assert.equal(aggregateTaskbarState(rows), 'green')
+
+  // 再次运行（running）时「运行中」优先于补记的待查看：一个会话只归一类。
+  assert.deepEqual(
+    deriveHubRows({ list, statuses: new Map([['s1', { running: true }]]), localUnread: { s1: 9 } })
+      .map((item) => item.state),
+    ['running'],
+  )
+  // 等待回答 / 报错的优先级同样高于待查看。
+  assert.deepEqual(
+    deriveHubRows({
+      list: listOf([row('s1')], { s1: outcome(9, 'error') }),
+      statuses: new Map([['s1', { pendingInteraction: { kind: 'question' } }]]),
+      localUnread: { s1: 9 },
+    }).map((item) => item.state),
+    ['answer'],
+  )
+})
+
+test('localUnread 记账的三种形状都按 id 命中，坏数据被丢弃', () => {
+  assert.equal(hasLocalUnread({ s1: 3 }, 's1'), true)
+  assert.equal(hasLocalUnread({ s1: 3 }, 's2'), false)
+  assert.equal(hasLocalUnread(new Set(['s1']), 's1'), true)
+  assert.equal(hasLocalUnread(new Map([['s1', 3]]), 's1'), true)
+  assert.equal(hasLocalUnread(undefined, 's1'), false)
+  assert.equal(hasLocalUnread(null, 's1'), false)
+  assert.equal(hasLocalUnread({ s1: null }, 's1'), false)
+
+  assert.deepEqual(normalizeLocalUnread({ a: 3, b: -1, c: 'x', d: 1.5, '': 2 }), { a: 3 })
+  assert.deepEqual(normalizeLocalUnread(null), {})
+  assert.deepEqual(normalizeLocalUnread([1, 2]), {})
 })

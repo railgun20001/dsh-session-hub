@@ -34,6 +34,14 @@ const RECENT_KEY = `${PLUGIN_ID}/recent-v1`
 const ACK_KEY = `${PLUGIN_ID}/error-acks-v1`
 const NOTIFY_LOG_KEY = `${PLUGIN_ID}/notify-log-v1`
 
+/**
+ * 「后台完成、尚未查看」记账（`{ [sessionId]: seq }`）。
+ *
+ * 官方 `completionUnread` 对主视图会话永远不置位（见 hub-model 的模块注释），
+ * 所以「正在看的对话在窗口被盖住时跑完」需要插件自己补记，才能亮出绿点 / 绿灯。
+ */
+const UNREAD_KEY = `${PLUGIN_ID}/local-unread-v1`
+
 /** 多标签页去重窗口：同一事件在此窗口内只允许一个页面真的弹通知。 */
 const CROSS_TAB_WINDOW_MS = 4000
 
@@ -275,6 +283,9 @@ function apply(ctx) {
   /** 已确认的报错回合：`{ [sessionId]: seq }`。 */
   const acks = createSnapshotStore(normalizeAckErrors(readJson(ACK_KEY, {})))
 
+  /** 「后台完成、尚未查看」的会话：`{ [sessionId]: seq }`。 */
+  const localUnread = createSnapshotStore(normalizeLocalUnread(readJson(UNREAD_KEY, {})))
+
   let tickTimer = null
   let persistTimer = null
   let disposed = false
@@ -424,6 +435,9 @@ function apply(ctx) {
     // 让左侧会话列表也滚到该会话行：官方 openSession 只切换主视图，不滚动列表。
     // 这一步只读 DOM、异步等待渲染，失败静默，绝不影响上面真正的跳转。
     revealSessionInList(sessionId)
+    // 用户主动跳转（点通知 / 点 chip）= 已经去看这个会话了：清掉「后台完成」记账，
+    // 绿点与任务栏绿灯随之熄灭。这条路径不依赖窗口此刻是否已经获得焦点。
+    if (clearLocalUnread(sessionId)) scheduleTick()
     if (options.raise !== false) callHostRoute('raise')
     focusWindowBestEffort()
   }
@@ -443,6 +457,49 @@ function apply(ctx) {
     acks.set(next)
     // 让任务栏聚合状态立即跟上（红灯在当前条目被确认后应当熄灭）。
     scheduleTick()
+  }
+
+  /**
+   * 补记一条「后台完成、尚未查看」。
+   *
+   * 只在窗口不在前台时调用：这正是官方 `completionUnread` 漏掉的那一类（主视图会话）。
+   * 同一个会话的旧 seq 不会被更旧的边沿覆盖；重复调用是幂等的。
+   * @param {string} sessionId 会话 id。
+   * @param {number} seq 该回合结局的投影序号。
+   * @returns {boolean} 记账是否发生了变化。
+   */
+  const markLocalUnread = (sessionId, seq) => {
+    if (typeof sessionId !== 'string' || sessionId === '') return false
+    if (!Number.isInteger(seq) || seq < 0) return false
+    const current = localUnread.getSnapshot()
+    if ((current[sessionId] ?? -1) >= seq) return false
+    const next = { ...current, [sessionId]: seq }
+    writeJson(UNREAD_KEY, next)
+    localUnread.set(next)
+    return true
+  }
+
+  /**
+   * 清掉某个会话（或缺省全部）的「后台完成」记账。
+   *
+   * 触发时机：窗口回到前台且正在看该会话、用户点了该会话的通知 / chip（openSession）。
+   * @param {string} [sessionId] 会话 id；不传表示全部清掉。
+   * @returns {boolean} 记账是否发生了变化。
+   */
+  const clearLocalUnread = (sessionId) => {
+    const current = localUnread.getSnapshot()
+    if (sessionId === undefined) {
+      if (Object.keys(current).length === 0) return false
+      writeJson(UNREAD_KEY, {})
+      localUnread.set({})
+      return true
+    }
+    if (!Object.hasOwn(current, sessionId)) return false
+    const next = { ...current }
+    delete next[sessionId]
+    writeJson(UNREAD_KEY, next)
+    localUnread.set(next)
+    return true
   }
 
   /**
@@ -654,22 +711,13 @@ function apply(ctx) {
       const statusSnapshot = uiSession.sessionStatus?.getSnapshot?.()
       const statuses = projectStatuses(statusSnapshot)
 
-      // 1) 状态栏行。正在看当前会话且窗口聚焦时，当前会话的报错视为已读（不再亮红）。
-      let rows = deriveHubRows({ list: listState, statuses, ackErrors: acks.getSnapshot() })
+      // 一次观察里只判定一次「窗口在不在前台」：状态栏、通知、待查看记账必须同源，
+      // 否则会在同一帧里得出互相矛盾的结论。
+      const focused = isFocused(config)
       const currentSessionId = currentSessionIdOf(listState)
-      if (currentSessionId !== undefined && isFocused(config)) {
-        const currentError = rows.find((row) => row.id === currentSessionId && row.state === 'error')
-        if (currentError !== undefined) {
-          ackError(currentSessionId, currentError.errorSeq)
-          rows = deriveHubRows({ list: listState, statuses, ackErrors: acks.getSnapshot() })
-        }
-      }
-      lastRows = rows
 
-      // 2) 任务栏：红 > 黄 > 绿 > 无。
-      pushTaskbar(aggregateTaskbarState(rows))
-
-      // 3) 通知边沿。
+      // 1) 通知边沿。它同时给出「这一轮结束了」的事实（result.completions），
+      //    所以必须排在状态栏推导之前——补记的「待查看」要在同一帧里点亮绿点 / 绿灯。
       const { sessions, projections, hostHalfPresent } = projectListState(listState)
       if (!hostHalfPresent) checkHostHalf()
       const result = planNotifications({
@@ -679,7 +727,7 @@ function apply(ctx) {
         state: watermarks,
         config,
         now: Date.now(),
-        focused: isFocused(config),
+        focused,
         currentSessionId,
         // 兜底路径只认探活结论：确证宿主半缺失才允许用 running 下降沿当「完成」。
         allowRunningFallback: hostHalfState === 'absent',
@@ -688,6 +736,42 @@ function apply(ctx) {
       watermarks = result.state
       schedulePersist()
 
+      // 2) 「后台完成」记账：官方 completionUnread 对主视图会话永不置位，这里补上。
+      //    - 窗口不在前台时完成的回合 → 记为待查看（绿点 / 任务栏绿灯 / 完成通知）；
+      //    - 窗口在前台且正在看这个会话 → 视为已查看，清掉记账。
+      if (focused) {
+        if (currentSessionId !== undefined) clearLocalUnread(currentSessionId)
+      } else {
+        for (const completion of result.completions) {
+          markLocalUnread(completion.sessionId, completion.seq)
+        }
+      }
+
+      // 3) 状态栏行。正在看当前会话且窗口聚焦时，当前会话的报错视为已读（不再亮红）。
+      let rows = deriveHubRows({
+        list: listState,
+        statuses,
+        ackErrors: acks.getSnapshot(),
+        localUnread: localUnread.getSnapshot(),
+      })
+      if (currentSessionId !== undefined && focused) {
+        const currentError = rows.find((row) => row.id === currentSessionId && row.state === 'error')
+        if (currentError !== undefined) {
+          ackError(currentSessionId, currentError.errorSeq)
+          rows = deriveHubRows({
+            list: listState,
+            statuses,
+            ackErrors: acks.getSnapshot(),
+            localUnread: localUnread.getSnapshot(),
+          })
+        }
+      }
+      lastRows = rows
+
+      // 4) 任务栏：红 > 黄 > 绿 > 无。
+      pushTaskbar(aggregateTaskbarState(rows))
+
+      // 5) 弹通知。
       if (result.notes.length > 0) {
         console.debug(`[${PLUGIN_ID}]`, result.notes)
       }
@@ -748,6 +832,26 @@ function apply(ctx) {
     console.error(`[${PLUGIN_ID}] 订阅会话状态失败`, error)
   }
 
+  // ---- 窗口焦点：焦点/可见性变化也要触发一次观察 ----
+  //
+  // 「后台完成」的记账靠焦点状态判定，而焦点变化**不会**带来会话状态推送：用户切回窗口
+  // 那一刻必须自己重新观察一次，否则绿点 / 绿灯会一直亮到下一次会话状态变化为止。
+  const focusListeners = []
+  const onWindowFocusChange = () => scheduleTick()
+  try {
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('focus', onWindowFocusChange)
+      window.addEventListener('blur', onWindowFocusChange)
+      focusListeners.push({ target: window, type: 'focus' }, { target: window, type: 'blur' })
+    }
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      document.addEventListener('visibilitychange', onWindowFocusChange)
+      focusListeners.push({ target: document, type: 'visibilitychange' })
+    }
+  } catch (error) {
+    console.warn(`[${PLUGIN_ID}] 订阅窗口焦点失败`, error)
+  }
+
   // ---- 工作区顶部状态栏：官方单占位插槽 ----
   try {
     if (typeof ctx.inject === 'function') {
@@ -794,8 +898,8 @@ function apply(ctx) {
             console.warn(`[${PLUGIN_ID}] 拿不到 React，状态栏不渲染（通知与任务栏不受影响）`)
             return
           }
-          const RailHeader = createSessionHubRail(React, { openSession, ackError, acks }, 'header')
-          const RailChrome = createSessionHubRail(React, { openSession, ackError, acks }, 'chrome')
+          const RailHeader = createSessionHubRail(React, { openSession, ackError, acks, unread: localUnread }, 'header')
+          const RailChrome = createSessionHubRail(React, { openSession, ackError, acks, unread: localUnread }, 'chrome')
           scoped.slots.inject('conversation.header.leading', () => scoped.slots.register({
             name: 'conversation.header.leading',
             locale: PLUGIN_ID,
@@ -851,6 +955,13 @@ function apply(ctx) {
     tickTimer = null
     persistTimer = null
     writeJson(WATERMARK_KEY, watermarks)
+    for (const { target, type } of focusListeners.splice(0)) {
+      try {
+        target.removeEventListener?.(type, onWindowFocusChange)
+      } catch {
+        /* 忽略 */
+      }
+    }
     try {
       if (typeof window !== 'undefined') window.removeEventListener('pagehide', onPageHide)
     } catch {
@@ -889,6 +1000,24 @@ function apply(ctx) {
     getRows: () => JSON.parse(JSON.stringify(lastRows)),
     /** @returns {string} 当前聚合任务栏状态。 */
     getTaskbarState: () => aggregateTaskbarState(lastRows),
+    /**
+     * 「后台完成、尚未查看」的记账（排障用）。
+     *
+     * 形如 `{ [sessionId]: seq }`。窗口不在前台时完成的回合会记在这里，用来补官方
+     * `completionUnread` 对主视图会话的空白；窗口回到前台并正在看该会话时自动清掉。
+     * @returns {object} 记账快照。
+     */
+    getLocalUnread: () => ({ ...localUnread.getSnapshot() }),
+    /**
+     * 手动清掉「后台完成」记账（排障用）。
+     * @param {string} [sessionId] 会话 id；不传表示全部清掉。
+     * @returns {boolean} 是否真的发生了变化。
+     */
+    clearLocalUnread: (sessionId) => {
+      const changed = clearLocalUnread(sessionId)
+      if (changed) scheduleTick()
+      return changed
+    },
     /** 立刻观察一次（不等合并窗口）。 */
     tick,
     /**
@@ -930,6 +1059,10 @@ function apply(ctx) {
       sessionsTracked: Object.keys(watermarks).length,
       statusRows: lastRows.length,
       taskbarState: aggregateTaskbarState(lastRows),
+      /** 「后台完成、尚未查看」的会话数（补官方 completionUnread 的那部分）。 */
+      localUnread: Object.keys(localUnread.getSnapshot()).length,
+      /** 窗口此刻是否在前台（与通知静默、待查看记账同源）。 */
+      focused: isFocused(config),
       desktopShell: isDesktopShell(),
       /** 宿主半在线状态（由 /ping 判定，与「有没有投影值」无关）。 */
       hostHalf: hostHalfState,

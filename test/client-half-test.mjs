@@ -99,11 +99,15 @@ async function createHarness(boot = {}) {
     Notification: globalThis.Notification,
     localStorage: globalThis.localStorage,
     fetch: globalThis.fetch,
+    location: globalThis.location,
   }
   globalThis.window = win
   globalThis.document = doc
   globalThis.Notification = FakeNotification
   globalThis.localStorage = localStorageStub
+  // `location` 只用来判定「是不是桌面外壳」（`dsh-app:` 协议）。任务栏状态点只在桌面端
+  // 上报，所以需要它的用例必须显式打开 `desktop`；其余用例保持普通浏览器语义。
+  globalThis.location = boot.desktop === true ? { protocol: 'dsh-app:' } : undefined
   // 宿主路由调用全部记下来：测试断言「点了通知有没有请求宿主半前置窗口」，
   // 以及「读不到投影值时会去 ping 宿主半」。
   globalThis.fetch = (url, options) => {
@@ -215,6 +219,15 @@ async function createHarness(boot = {}) {
       globalThis.Notification = previous.Notification
       globalThis.localStorage = previous.localStorage
       globalThis.fetch = previous.fetch
+      if (previous.location === undefined) {
+        try {
+          delete globalThis.location
+        } catch {
+          globalThis.location = undefined
+        }
+      } else {
+        globalThis.location = previous.location
+      }
     },
   }
 }
@@ -717,6 +730,121 @@ test('窗口不可见时不算聚焦，照常弹', async () => {
     assert.equal(harness.state.notifications.length, 1)
   } finally {
     globalThis.document.visibilityState = 'visible'
+    harness.dispose()
+    harness.restore()
+  }
+})
+
+test('当前会话在窗口被别的应用盖住时完成：弹完成通知，并把任务栏点亮成绿灯（待查看）', async () => {
+  const harness = await createHarness({
+    desktop: true,
+    sessions: [sessionRow('s1', { retainedBy: { mainView: 1 } })],
+    projections: { s1: turnEnd(10, 'completed') },
+  })
+  try {
+    // 窗口可见、但不在前台（被别的窗口盖住 / 最小化前的后台状态）。
+    globalThis.document.hasFocus = () => false
+    await settle()
+    const api = globalThis.__DSH_SESSION_HUB__
+    assert.equal(api.inspect().focused, false, '不在前台的窗口不能被当成「用户正在看」')
+
+    harness.setProjection('s1', turnEnd(12, 'completed'))
+    await settle()
+
+    // 1) Windows 通知照常弹：当前会话不再因为「正在看」而被静默。
+    assert.equal(harness.state.notifications.length, 1)
+    assert.equal(harness.state.notifications[0].title, 'DSH · 任务完成')
+    assert.equal(harness.state.notifications[0].options.body, '会话 s1')
+
+    // 2) 官方 completionUnread 对主视图会话不置位，靠插件补记出「待查看」绿行。
+    assert.deepEqual(api.getRows().map((item) => [item.id, item.state]), [['s1', 'unread']])
+    assert.deepEqual(api.getLocalUnread(), { s1: 12 })
+    assert.equal(api.getTaskbarState(), 'green')
+
+    // 3) 宿主半真的收到了绿灯请求（任务栏图标上的绿点）。
+    const taskbar = harness.state.fetches.filter((call) => call.url === 'dsh-session-hub/taskbar')
+    assert.ok(taskbar.length > 0, '桌面端应当向宿主半上报任务栏状态')
+    assert.deepEqual(JSON.parse(taskbar.at(-1).options.body), { state: 'green' })
+
+    // 4) 记账落盘：刷新页面（新客户端半）后绿点仍然在。
+    assert.deepEqual(JSON.parse(harness.state.storage.get('dsh-session-hub/local-unread-v1')), { s1: 12 })
+  } finally {
+    harness.dispose()
+    harness.restore()
+  }
+})
+
+test('窗口回到前台且正在看该会话后，「待查看」记账与任务栏绿灯一起熄灭', async () => {
+  const harness = await createHarness({
+    desktop: true,
+    sessions: [sessionRow('s1', { retainedBy: { mainView: 1 } })],
+    projections: { s1: turnEnd(10, 'completed') },
+  })
+  try {
+    globalThis.document.hasFocus = () => false
+    await settle()
+    harness.setProjection('s1', turnEnd(12, 'completed'))
+    await settle()
+    assert.equal(globalThis.__DSH_SESSION_HUB__.getTaskbarState(), 'green')
+
+    // 用户切回窗口：焦点变化本身不带会话状态推送，必须自己再观察一次。
+    globalThis.document.hasFocus = () => true
+    for (const listener of harness.state.listeners.get('focus') ?? []) listener()
+    await settle()
+
+    const api = globalThis.__DSH_SESSION_HUB__
+    assert.deepEqual(api.getLocalUnread(), {})
+    assert.equal(api.getTaskbarState(), 'none')
+    assert.deepEqual(api.getRows(), [])
+    const taskbar = harness.state.fetches.filter((call) => call.url === 'dsh-session-hub/taskbar')
+    assert.deepEqual(JSON.parse(taskbar.at(-1).options.body), { state: 'none' })
+  } finally {
+    harness.dispose()
+    harness.restore()
+  }
+})
+
+test('窗口在前台且正在看该会话时完成：静默，不点绿灯（结果就在眼前）', async () => {
+  const harness = await createHarness({
+    desktop: true,
+    sessions: [sessionRow('s1', { retainedBy: { mainView: 1 } })],
+    projections: { s1: turnEnd(10, 'completed') },
+  })
+  try {
+    await settle()
+    harness.setProjection('s1', turnEnd(12, 'completed'))
+    await settle()
+
+    const api = globalThis.__DSH_SESSION_HUB__
+    assert.equal(harness.state.notifications.length, 0)
+    assert.deepEqual(api.getLocalUnread(), {}, '盯着看的时候完成，不该记成待查看')
+    assert.equal(api.getTaskbarState(), 'none')
+  } finally {
+    harness.dispose()
+    harness.restore()
+  }
+})
+
+test('点完成通知跳回会话时清掉「待查看」记账（绿灯随之熄灭）', async () => {
+  const harness = await createHarness({
+    desktop: true,
+    sessions: [sessionRow('s1', { retainedBy: { mainView: 1 } })],
+    projections: { s1: turnEnd(10, 'completed') },
+  })
+  try {
+    globalThis.document.hasFocus = () => false
+    await settle()
+    harness.setProjection('s1', turnEnd(12, 'completed'))
+    await settle()
+    assert.equal(globalThis.__DSH_SESSION_HUB__.getTaskbarState(), 'green')
+
+    harness.state.notifications[0].onclick()
+    await settle()
+
+    const api = globalThis.__DSH_SESSION_HUB__
+    assert.deepEqual(api.getLocalUnread(), {}, '点通知 = 已经去看过了')
+    assert.equal(api.getTaskbarState(), 'none')
+  } finally {
     harness.dispose()
     harness.restore()
   }

@@ -40,7 +40,8 @@ function createFallbackT(dict) {
  *   openSession: (sessionId: string) => void,
  *   ackError: (sessionId: string, seq: number|null) => void,
  *   acks: { subscribe: (listener: () => void) => () => void, getSnapshot: () => object },
- * }} deps 由 client-main 注入的动作与确认表。
+ *   unread?: { subscribe: (listener: () => void) => () => void, getSnapshot: () => object },
+ * }} deps 由 client-main 注入的动作、确认表与「后台完成」记账（`unread` 可选）。
  * @param {'header'|'chrome'} [variant] 渲染位置：会话标题前，或 Windows 顶栏菜单之后。
  * @returns {Function} React 函数组件。
  */
@@ -48,6 +49,9 @@ function createSessionHubRail(React, deps, variant = 'header') {
   const h = React.createElement
   const EMPTY_LIST = { byId: {}, projectionsBySession: {} }
   const EMPTY_STATUSES = new Map()
+  const EMPTY_UNREAD = {}
+  /** 「后台完成」记账的缺省仓库：没有注入时组件照常渲染，只是没有补记的绿点。 */
+  const EMPTY_STORE = { subscribe: () => () => {}, getSnapshot: () => EMPTY_UNREAD }
 
   /** 文案回落：插槽没有绑定 locale 时也能显示中文。 */
   const FALLBACK = {
@@ -69,11 +73,11 @@ function createSessionHubRail(React, deps, variant = 'header') {
   const useEmptyStatuses = () => EMPTY_STATUSES
 
   /**
-   * 订阅「已确认报错」表；React 18+ 用 useSyncExternalStore，旧版本退化为强制刷新。
+   * 订阅一个快照仓库；React 18+ 用 useSyncExternalStore，旧版本退化为强制刷新。
    * @param {object} store 快照仓库。
-   * @returns {object} 当前确认表。
+   * @returns {object} 当前快照。
    */
-  function useAcks(store) {
+  function useSnapshot(store) {
     if (typeof React.useSyncExternalStore === 'function') {
       return React.useSyncExternalStore(store.subscribe, store.getSnapshot)
     }
@@ -119,8 +123,11 @@ function createSessionHubRail(React, deps, variant = 'header') {
     const useSessionStatus = typeof props?.useSessionStatus === 'function' ? props.useSessionStatus : useEmptyStatuses
     const list = useSessions((value) => value)
     const statuses = useSessionStatus((value) => value)
-    const ackErrors = useAcks(deps.acks)
-    const rows = deriveHubRows({ list, statuses, ackErrors, now: Date.now() })
+    const ackErrors = useSnapshot(deps.acks)
+    // 官方的 completionUnread 对主视图会话永不置位；「窗口在后台时跑完」的绿点来自
+    // 本插件的补记（client-main 的 localUnread），这里必须一起喂给模型。
+    const localUnread = useSnapshot(deps.unread ?? EMPTY_STORE)
+    const rows = deriveHubRows({ list, statuses, ackErrors, localUnread, now: Date.now() })
     const [expanded, setExpanded] = React.useState(false)
     const visibleRows = expanded ? rows : rows.slice(0, 3)
     const hiddenCount = rows.length - visibleRows.length

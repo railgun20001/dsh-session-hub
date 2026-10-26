@@ -28,6 +28,16 @@
  *   - 否则有**待查看**（未读完成）→ green
  *   - 都没有 → none（清除覆盖图标）
  *
+ * ## 「待查看」为什么不能只信官方的 completionUnread
+ *
+ * 官方 `ui-session` 的 `observeRunning` 只在「running → 停止」且**该会话不是主视图**
+ * （`retainedBy.mainView === 0`）时记 `completionUnread`；`reconcileStatus` 还会对
+ * 主视图会话主动清掉它。于是「你正在看这个对话、但 DSH 窗口被别的窗口盖住」这种最常见
+ * 的等任务场景里，回合结束**不会有任何待查看状态**——绿点、绿灯、状态栏 chip 全都不出现。
+ *
+ * 插件因此自带一份「后台完成」记账（`localUnread`）：窗口不在前台时观测到的回合完成
+ * 由客户端半补记，等窗口回到前台且真的在看这个会话时再清掉。判定见 {@link hasLocalUnread}。
+ *
  * **运行中不点灯**：正在跑是常态，不需要你介入；把它点亮只会让任务栏一直是绿的，
  * 反而盖掉真正的提示。运行中仍然出现在状态栏 chip 里（蓝色脉冲点）。
  *
@@ -144,18 +154,62 @@ export function isUnackedFailure(projection, ackedSeq) {
 }
 
 /**
+ * 判断某会话是否被本插件补记为「后台完成、尚未查看」。
+ *
+ * 接受的形状（都按 id 命中即可，值本身不参与判定）：
+ *   - `{ [sessionId]: seq }`（客户端半落盘的形状）；
+ *   - `Set<string>` / `Map<string, number>`（测试与调用方便利）。
+ *
+ * @param {object|Set<string>|Map<string, number>|null|undefined} localUnread 记账表。
+ * @param {string} id 会话 id。
+ * @returns {boolean} 是否属于「后台完成未查看」。
+ */
+export function hasLocalUnread(localUnread, id) {
+  if (localUnread === null || localUnread === undefined) return false
+  if (localUnread instanceof Set || localUnread instanceof Map) return localUnread.has(id)
+  if (typeof localUnread !== 'object') return false
+  const value = localUnread[id]
+  return value !== undefined && value !== null && value !== false
+}
+
+/**
+ * 归一化持久化的「后台完成」记账：只保留整数 seq（>= 0）的会话。
+ *
+ * seq 是「补记时那一轮回合的投影序号」，只用于诊断与去重；判定只看键是否存在。
+ * @param {unknown} value 读到的 JSON。
+ * @returns {object} `{ [sessionId]: number }`。
+ */
+export function normalizeLocalUnread(value) {
+  const out = {}
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return out
+  for (const [id, seq] of Object.entries(value)) {
+    if (typeof id === 'string' && id !== '' && Number.isInteger(seq) && seq >= 0) out[id] = seq
+  }
+  return out
+}
+
+/**
  * 从快照推导状态栏行。
  *
  * @param {object} input 输入。
  * @param {object} input.list 会话列表快照。
  * @param {Map|object} input.statuses 统一会话状态（Map 或对象）。
  * @param {object} [input.ackErrors] 已确认的报错 seq：`{ [sessionId]: number }`。
+ * @param {object|Set<string>|Map<string, number>} [input.localUnread] 本插件补记的
+ *   「后台完成、尚未查看」会话（见 {@link hasLocalUnread}）。
  * @param {boolean} [input.includeSubagents] 是否包含子代理会话（默认 false）。
  * @param {number} [input.now] 当前时间（保留给未来排序/过期策略）。
  * @returns {Array<{id: string, title: string, state: string, pendingKind: string|null, errorSeq: number|null, updatedAt: number}>}
  *   按颜色优先级（红 > 黄 > 绿 > 蓝）与更新时间排好序的行。
  */
-export function deriveHubRows({ list, statuses, ackErrors = {}, includeSubagents = false, now = 0 } = {}) {
+export function deriveHubRows({
+  list,
+  statuses,
+  ackErrors = {},
+  localUnread = {},
+  includeSubagents = false,
+  now = 0,
+} = {}) {
   const byId = list?.byId
   if (byId === null || typeof byId !== 'object') return []
   const statusOf = lookupOf(statuses)
@@ -176,7 +230,9 @@ export function deriveHubRows({ list, statuses, ackErrors = {}, includeSubagents
     const acked = Number.isInteger(ackErrors[id]) ? ackErrors[id] : -1
     const failed = isUnackedFailure(projection, acked)
     const running = status?.running === true || row.running === true
-    const unread = status?.completionUnread === true
+    // 「待查看」有两个来源：官方 completionUnread（非主视图会话），以及本插件为
+    // 「窗口不在前台时完成的当前会话」补记的记账（官方对主视图会话永远不会置位）。
+    const unread = status?.completionUnread === true || hasLocalUnread(localUnread, id)
 
     // 判定顺序（一个会话只归一类，取第一个命中的）：等待回答 > 报错 > 运行中 > 待查看。
     // 这与 STATE_ORDER（显示顺序 红 > 黄 > 绿 > 蓝）是两件事：同时「等你回答」又「上一轮

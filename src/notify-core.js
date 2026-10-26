@@ -37,6 +37,15 @@
  * 才通知。再加一层「新鲜度窗口」：事件 `time` 早于 `now - freshnessWindowMs` 的边沿
  * 只推进水位、不通知（宿主重启后补写的历史事件不会变成一串迟到的通知）。
  *
+ * ## 为什么除了通知还要回报 `completions`
+ *
+ * 「这一轮结束了」是一个**状态事实**，不只是「该不该弹通知」：官方的
+ * `completionUnread`（待查看绿点 / 任务栏绿灯）对主视图会话永远不置位，所以
+ * 「正在看的对话在后台跑完」这个最常见场景需要客户端半自己补记。边沿判定只应该有一份
+ * 实现，因此引擎把本次观测到的**回合完成边沿**（completed / max-tokens）连同通知一起
+ * 回报给调用方；是否补记由调用方按「窗口是否在前台」决定（见 `planNotifications` 的
+ * `completions` 返回值）。注意它与分类开关、静默无关——关掉「完成通知」不影响绿点。
+ *
  * @module notify-core
  */
 
@@ -85,6 +94,14 @@ const FAILURE_OUTCOMES = Object.freeze(['error', 'interrupted'])
  * 等它，弹「任务完成」是虚假信息。宁可不提醒，也不要提醒错。
  */
 const COMPLETION_OUTCOMES = Object.freeze(['completed'])
+
+/**
+ * 算作「这一轮跑完了」的候选类别。
+ *
+ * 除通知外，它们还要被回报成 `completions`，供客户端半补记「待查看」（绿点 / 绿灯）：
+ * `max-tokens` 也是「这一轮不会再继续」，用户回来时要能看出结果已经在那儿了。
+ */
+const COMPLETION_CATEGORIES = Object.freeze(['completed', 'max-tokens'])
 
 /** 水位表版本：形状变化时递增，旧版本数据直接丢弃。 */
 export const STATE_VERSION = 1
@@ -223,8 +240,9 @@ export function describeNotification({ category, title, projection, pending }) {
  * @param {string|undefined|null} input.currentSessionId 当前打开的会话 id。
  * @param {boolean} [input.allowRunningFallback] 是否允许 running 下降沿兜底；
  *   **默认 false**，只有调用方确证宿主半缺失时才传 true。
- * @returns {{notifications: Array<object>, state: object, notes: Array<string>}}
- *   通知列表、新水位、诊断说明（用于调试与单测断言）。
+ * @returns {{notifications: Array<object>, state: object, notes: Array<string>, completions: Array<object>}}
+ *   通知列表、新水位、诊断说明（用于调试与单测断言）、以及本次观测到的**回合完成边沿**
+ *   （`{ sessionId, seq, time, category }`，与通知开关/静默无关）。
  */
 export function planNotifications(input) {
   const {
@@ -241,6 +259,7 @@ export function planNotifications(input) {
 
   const next = {}
   const notifications = []
+  const completions = []
   const notes = []
   const recency = new Map()
 
@@ -288,6 +307,17 @@ export function planNotifications(input) {
 
     if (candidate === null) continue
 
+    // 3.5) 回合完成边沿：这是「状态事实」，与通知开关、静默无关，单独回报给调用方。
+    // 只认真正的投影边沿（退化路径的兜底没有 seq，也就没有可补记的「哪一轮」）。
+    if (candidate.projection !== null && COMPLETION_CATEGORIES.includes(candidate.category)) {
+      completions.push({
+        sessionId: id,
+        seq: projectionSeq(candidate.projection),
+        time: typeof candidate.projection?.time === 'number' ? candidate.projection.time : 0,
+        category: candidate.category,
+      })
+    }
+
     // 4) 总开关 / 分类开关 / 静默。
     if (!config.enabled || !categoryEnabled(candidate.category, config)) {
       notes.push(`${id}: ${candidate.category} 未开启，跳过`)
@@ -310,7 +340,7 @@ export function planNotifications(input) {
     })
   }
 
-  return { notifications, state: prune(next, recency, config), notes }
+  return { notifications, state: prune(next, recency, config), notes, completions }
 }
 
 /**

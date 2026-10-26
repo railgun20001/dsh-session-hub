@@ -220,6 +220,46 @@ test('行悬停提示：只在有未确认失败时出现，区分失败与中�
   assert.equal(HintAcked({ sessionId: 'bad', useSessions }), null)
 })
 
+test('「后台完成」记账也会渲染成「待查看」chip（官方 completionUnread 覆盖不到主视图）', () => {
+  const unreadStore = {
+    subscribe: () => () => {},
+    getSnapshot: () => ({ s1: 12 }),
+  }
+  const Rail = loadFactory()(reactStub(), {
+    openSession: () => {},
+    ackError: () => {},
+    acks: { subscribe: () => () => {}, getSnapshot: () => ({}) },
+    unread: unreadStore,
+  })
+  const list = {
+    // 主视图会话：官方永远不会给它置 completionUnread。
+    byId: { s1: row('s1', { retainedBy: { mainView: 1 } }) },
+    projectionsBySession: {
+      s1: { values: { hubTurnOutcome: { outcome: 'completed', seq: 12, turn: 1, time: 1, code: null, message: null } } },
+    },
+  }
+  const tree = Rail({
+    useSessions: (selector) => selector(list),
+    useSessionStatus: (selector) => selector(new Map([['s1', { completionUnread: false }]])),
+  })
+  const chip = findNode(tree, (node) => typeof node.props?.className === 'string'
+    && node.props.className.includes('dsh-hub__chip--unread'))
+  assert.ok(chip !== undefined, '应当渲染待查看 chip')
+  assert.match(collectText(tree).join('|'), /待查看/)
+
+  // 没有注入 unread 仓库（旧接线 / 测试）时组件照常工作，只是没有补记的绿点。
+  const RailWithoutUnread = loadFactory()(reactStub(), {
+    openSession: () => {},
+    ackError: () => {},
+    acks: { subscribe: () => () => {}, getSnapshot: () => ({}) },
+  })
+  const plain = RailWithoutUnread({
+    useSessions: (selector) => selector(list),
+    useSessionStatus: (selector) => selector(new Map([['s1', { completionUnread: false }]])),
+  })
+  assert.match(collectText(plain).join('|'), /全部空闲/)
+})
+
 test('chrome 变体带 fixed 顶栏类与菜单偏移 CSS', () => {
   const factory = loadFactory()
   const Rail = factory(reactStub(), {
