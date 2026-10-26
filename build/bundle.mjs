@@ -8,14 +8,15 @@
  *   window.__ModuleLoader__.load({ id: '<包名>', factory: (require) => exports })
  *
  * 客户端 bundle 里不能出现 `import`/`export`（它不是 ES 模块），也不能依赖包外的
- * 相对路径（浏览器只拿到这一个文件）。因此本脚本做一次极简的源码内联：
+ * 相对路径（浏览器只拿到这一个文件）。因此本脚本做一次极简的源码内联：把 `SOURCES`
+ * 里的每个文件按顺序塞进同一个 factory 作用域，末尾挂 `exports.apply` / `exports.inject`。
  *
- *   src/hub-model.js（ESM，纯逻辑，可单测）        → 去掉 `export ` 前缀
- *   src/notify-core.js（ESM，通知边沿引擎，可单测）→ 去掉 `export ` 前缀
- *   src/hub-scroll.js（ESM，侧栏行定位，可单测）   → 去掉 `export ` 前缀
- *   src/hub-ui.js（裸脚本，React 组件工厂）        → 原样内联
- *   src/client-main.js（裸脚本，接线）             → 原样内联
- *   五者塞进 factory 函数体，末尾挂 `exports.apply` / `exports.inject`。
+ * ## 顺序即作用域
+ *
+ * 内联后所有模块共享一个作用域，模块之间**不 import，直接按名字引用**。因此：
+ *   - 顶层 `const` 只允许被「函数体内」引用（函数在调用时才求值），不允许在模块初始化
+ *     阶段读取别的模块的 `const`；
+ *   - 顺序按「纯逻辑 → 有状态 → 胶水」排，读起来就是数据流的方向。
  *
  * 用法：
  *   node build/bundle.mjs            # 生成 lib/client.js
@@ -34,12 +35,27 @@ const ROOT = join(HERE, '..')
 /** 包名：注册到 __ModuleLoader__ 的 id，必须与 package.json 的 name 一致。 */
 const PACKAGE_NAME = 'dsh-session-hub'
 
-/** 源码与产物路径。 */
-const MODEL_SOURCE = join(ROOT, 'src', 'hub-model.js')
-const CORE_SOURCE = join(ROOT, 'src', 'notify-core.js')
-const SCROLL_SOURCE = join(ROOT, 'src', 'hub-scroll.js')
-const UI_SOURCE = join(ROOT, 'src', 'hub-ui.js')
-const MAIN_SOURCE = join(ROOT, 'src', 'client-main.js')
+/**
+ * 参与内联的源文件，**顺序即作用域顺序**。
+ *
+ * 每一项：`file` 是相对 src/ 的文件名，`label` 是产物里 region 注释用的说明。
+ * @type {ReadonlyArray<{ file: string, label: string }>}
+ */
+const SOURCES = Object.freeze([
+  { file: 'hub-identity.js', label: '插件 id 与存储键（单一来源）' },
+  { file: 'hub-strings.js', label: '界面文案（单一来源）' },
+  { file: 'hub-model.js', label: '状态栏 / 任务栏纯逻辑' },
+  { file: 'notify-core.js', label: '通知边沿引擎（纯逻辑）' },
+  { file: 'hub-scroll.js', label: '侧栏会话行定位、滚动与揭示控制器' },
+  { file: 'hub-json-store.js', label: 'localStorage JSON 读写' },
+  { file: 'hub-stores.js', label: '配置 / 水位 / 确认表 / 后台完成记账' },
+  { file: 'hub-notify.js', label: '通知落地（短 tag / 跨标签页去重 / 落地日志）' },
+  { file: 'hub-host.js', label: '宿主半路由（前置窗口 / 任务栏状态 / 在线探活）' },
+  { file: 'hub-ui.js', label: 'React 状态栏与行悬停提示组件' },
+  { file: 'hub-slots.js', label: '插槽注册' },
+  { file: 'client-main.js', label: '接线：服务 → 模型 → 通知 / 状态栏 / 任务栏' },
+])
+
 const PACKAGE_JSON = join(ROOT, 'package.json')
 const OUTPUT = join(ROOT, 'lib', 'client.js')
 
@@ -84,11 +100,6 @@ function indent(source, pad) {
  * @returns {string} lib/client.js 的完整内容。
  */
 function build() {
-  const model = inlineEsModule(readFileSync(MODEL_SOURCE, 'utf8'), 'hub-model.js')
-  const core = inlineEsModule(readFileSync(CORE_SOURCE, 'utf8'), 'notify-core.js')
-  const scroll = inlineEsModule(readFileSync(SCROLL_SOURCE, 'utf8'), 'hub-scroll.js')
-  const ui = readFileSync(UI_SOURCE, 'utf8')
-  const main = readFileSync(MAIN_SOURCE, 'utf8')
   // 版本从 package.json 注入，保证「宿主半读 package.json」与「客户端半内联」永远一致：
   // 两半版本不一致是真实存在的运行状态（宿主半随 DSH 启动加载，客户端半随页面加载），
   // 必须能一眼看出来。
@@ -98,12 +109,8 @@ function build() {
   const header = `/**
  * dsh-session-hub —— 客户端 bundle（由 build/bundle.mjs 生成，请不要手改）
  *
- * 内联自：
- *   - src/hub-model.js     状态栏 / 任务栏纯逻辑
- *   - src/notify-core.js   通知决策引擎（纯逻辑）
- *   - src/hub-scroll.js    侧栏会话行定位与滚动（纯逻辑）
- *   - src/hub-ui.js        顶部状态栏 React 组件
- *   - src/client-main.js   接线：DSH 服务 → 模型 → 通知 / 状态栏 / 任务栏
+ * 内联自 src/ 下的 ${SOURCES.length} 个文件（顺序即作用域顺序）：
+${SOURCES.map((entry) => ` *   - src/${entry.file.padEnd(20)}${entry.label}`).join('\n')}
  *
  * 协议：DSH 客户端模块系统用 classic <script> 加载本文件，脚本执行时通过
  * window.__ModuleLoader__.load({ id, factory }) 注册工厂；工厂在首次
@@ -118,12 +125,9 @@ window.__ModuleLoader__.load({
 
 \t\t/** 客户端半的构建版本；由 build/bundle.mjs 从 package.json 注入。 */
 \t\tconst BUNDLE_VERSION = ${JSON.stringify(version)};
-
-\t\t//#region src/hub-model.js
 `
 
   const footer = `
-\t\t//#endregion
 \t\texports.apply = apply;
 \t\texports.inject = inject;
 \t\treturn module.exports;
@@ -131,19 +135,16 @@ window.__ModuleLoader__.load({
 });
 `
 
-  const body = [
-    header,
-    indent(model.trimEnd(), '\t\t'),
-    '\n\t\t//#endregion\n\t\t//#region src/notify-core.js\n',
-    indent(core.trimEnd(), '\t\t'),
-    '\n\t\t//#endregion\n\t\t//#region src/hub-ui.js\n',
-    indent(ui.trimEnd(), '\t\t'),
-    '\n\t\t//#endregion\n\t\t//#region src/hub-scroll.js\n',
-    indent(scroll.trimEnd(), '\t\t'),
-    '\n\t\t//#endregion\n\t\t//#region src/client-main.js\n',
-    indent(main.trimEnd(), '\t\t'),
-    footer,
-  ].join('\n')
+  const chunks = [header]
+  for (const entry of SOURCES) {
+    const source = readFileSync(join(ROOT, 'src', entry.file), 'utf8')
+    chunks.push(`\n\t\t//#region src/${entry.file} —— ${entry.label}\n`)
+    chunks.push(indent(inlineEsModule(source, entry.file).trimEnd(), '\t\t'))
+    chunks.push('\n\t\t//#endregion\n')
+  }
+  chunks.push(footer)
+
+  const body = chunks.join('')
 
   // 语法自检：产物必须是可解析的脚本。
   try {

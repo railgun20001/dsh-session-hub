@@ -35,6 +35,22 @@ export const SESSION_ROW_PREFIX = 'session:'
 export const WORKSPACE_ROW_PREFIX = 'workspace:'
 
 /**
+ * 跳转后等待侧栏渲染出目标会话行的上限（毫秒）。
+ *
+ * 点一下 chip 后列表要等 React 提交、必要时还要先抬高 watermark 才渲染目标行，
+ * 所以不是同步可见的；1.5 秒足够覆盖正常渲染，超过就静默放弃（绝不长时间占用帧）。
+ */
+export const REVEAL_RETRY_TIMEOUT_MS = 1500
+
+/**
+ * 揭示重试的最大帧数。
+ *
+ * 与 {@link REVEAL_RETRY_TIMEOUT_MS} 取先到者：文档很大时每次重试都要扫一遍
+ * `[data-row-key]`，40 帧（约 0.7 秒 @60fps）已足够覆盖正常渲染，再等只是浪费。
+ */
+export const REVEAL_MAX_ATTEMPTS = 40
+
+/**
  * 按 `data-row-key` 精确定位一行。
  * @param {Document|object|null} doc 文档（真实 DOM 或测试桩）。
  * @param {string} key 目标 `data-row-key` 的完整值。
@@ -146,4 +162,83 @@ export function scrollSessionRowIntoView(doc, sessionId, context = {}) {
   if (workspaceRow === null) return null
   scrollRowIntoView(workspaceRow)
   return 'workspace'
+}
+
+/**
+ * 创建一个「跳转后把侧栏滚到目标行」的控制器。
+ *
+ * ## 为什么要重试
+ *
+ * 跳转先改当前会话，侧栏列表要等 React 提交后才会（必要时先抬高该组 watermark 再）渲染
+ * 目标行，所以刚跳完那一刻目标行**可能还不在 DOM 里**。这里用 rAF 反复试到
+ * {@link REVEAL_RETRY_TIMEOUT_MS} 与 {@link REVEAL_MAX_ATTEMPTS} 先到者为止，
+ * 每次只扫一遍 `[data-row-key]`。
+ *
+ * ## 为什么只认最新一次跳转
+ *
+ * 连续点几个 chip 时，前几次的重试循环不能把列表再拉回旧会话——所以每次跳转领一个自增
+ * 序号，循环里发现序号变了就立刻退出。
+ *
+ * @param {object} options 依赖注入。
+ * @param {string} options.pluginId 日志标签。
+ * @param {() => Document|object|null} options.getDocument 取当前文档（测试注入）。
+ * @param {() => object|undefined} [options.getWorkspaces] 取 `uiWorkspace.workspaces.list`
+ *   快照，仅用于「会话行不在 DOM 时找所属分组行」。
+ * @param {() => boolean} [options.isCancelled] 插件已卸载时返回 true，让等待循环退出。
+ * @param {() => number} [options.now] 当前时间（测试注入）。
+ * @param {(callback: () => void) => void} [options.schedule] 下一帧调度（默认 rAF，缺省退回定时器）。
+ * @returns {(sessionId: string) => void} 揭示动作。
+ */
+export function createRowRevealer({
+  pluginId,
+  getDocument,
+  getWorkspaces,
+  isCancelled = () => false,
+  now = () => Date.now(),
+  schedule,
+}) {
+  /** 每次跳转的序号：新跳转让旧的等待循环立刻退出。 */
+  let sequence = 0
+
+  /**
+   * 在下一帧再试一次（优先 rAF，没有时退回定时器）。
+   * @param {() => void} callback 回调。
+   * @returns {void}
+   */
+  const nextFrame = schedule ?? ((callback) => {
+    try {
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(callback)
+        return
+      }
+    } catch {
+      /* 某些宿主没有 rAF：退回定时器 */
+    }
+    setTimeout(callback, 16)
+  })
+
+  return (sessionId) => {
+    if (typeof sessionId !== 'string' || sessionId === '') return
+    const doc = getDocument()
+    if (doc === null || doc === undefined) return
+    const mine = (sequence += 1)
+    const deadline = now() + REVEAL_RETRY_TIMEOUT_MS
+    let attempts = 0
+    const attempt = () => {
+      if (isCancelled() || mine !== sequence) return
+      let hit = null
+      try {
+        hit = scrollSessionRowIntoView(doc, sessionId, { workspaces: getWorkspaces?.() })
+      } catch (error) {
+        console.debug(`[${pluginId}] 滚动会话列表失败`, error)
+        return
+      }
+      if (hit !== null) return
+      attempts += 1
+      if (attempts >= REVEAL_MAX_ATTEMPTS) return
+      if (now() >= deadline) return
+      nextFrame(attempt)
+    }
+    attempt()
+  }
 }

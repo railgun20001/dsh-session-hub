@@ -16,6 +16,8 @@
  * 前两者都是订阅式快照钩子，会话状态一变就重渲染；组件自己不订阅事件、不扫描 DOM。
  *
  * 视觉全部使用 `--dsw-alias-*` 主题令牌；颜色只用于状态点，语义与原生侧栏一致。
+ * 可见文案一律来自 {@link HUB_STRINGS}（hub-strings.js）——组件里不再存第二份副本，
+ * locale 服务不可用时直接用其中的 `zh` 回落。
  *
  * @module dsh-session-hub/hub-ui
  */
@@ -54,19 +56,7 @@ function createSessionHubRail(React, deps, variant = 'header') {
   const EMPTY_STORE = { subscribe: () => () => {}, getSnapshot: () => EMPTY_UNREAD }
 
   /** 文案回落：插槽没有绑定 locale 时也能显示中文。 */
-  const FALLBACK = {
-    label: '会话',
-    idle: '全部空闲',
-    aria: '会话状态：{count} 个需要关注',
-    more: '还有 {count} 个会话',
-    collapse: '收起',
-    'state.answer': '等待回答',
-    'state.error': '报错',
-    'state.running': '运行中',
-    'state.unread': '待查看',
-  }
-
-  const fallbackT = createFallbackT(FALLBACK)
+  const fallbackT = createFallbackT(HUB_STRINGS.zh)
 
   /** 没有插槽钩子时的安全回落（只会在测试或异常组合里用到）。 */
   const useEmptySessions = () => EMPTY_LIST
@@ -217,11 +207,7 @@ function createSessionHubRowHint(React, deps) {
   const h = React.createElement
   const EMPTY_LIST = { byId: {}, projectionsBySession: {} }
   const useEmptySessions = () => EMPTY_LIST
-  const fallbackT = createFallbackT({
-    'row.failed': '本轮失败',
-    'row.interrupted': '本轮中断',
-    'row.hint': '该会话最后一轮没有正常结束',
-  })
+  const fallbackT = createFallbackT(HUB_STRINGS.zh)
 
   /**
    * 订阅「已确认报错」表。

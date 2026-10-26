@@ -173,13 +173,14 @@ export function hasLocalUnread(localUnread, id) {
 }
 
 /**
- * 归一化持久化的「后台完成」记账：只保留整数 seq（>= 0）的会话。
+ * 归一化一张「会话 id → seq」的持久表：只保留非空字符串 id 与非负整数 seq。
  *
- * seq 是「补记时那一轮回合的投影序号」，只用于诊断与去重；判定只看键是否存在。
+ * 「已确认的报错」与「补记的后台完成」是**同一形状**的两张表，以前各写了一份逐行相同的
+ * 实现；现在共用这一个函数（下面两个名字是语义别名，保留是为了调用处的可读性）。
  * @param {unknown} value 读到的 JSON。
  * @returns {object} `{ [sessionId]: number }`。
  */
-export function normalizeLocalUnread(value) {
+export function normalizeSeqMap(value) {
   const out = {}
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return out
   for (const [id, seq] of Object.entries(value)) {
@@ -187,6 +188,14 @@ export function normalizeLocalUnread(value) {
   }
   return out
 }
+
+/**
+ * 归一化持久化的「后台完成」记账：只保留整数 seq（>= 0）的会话。
+ *
+ * seq 是「补记时那一轮回合的投影序号」，只用于诊断与去重；判定只看键是否存在。
+ * @type {(value: unknown) => object}
+ */
+export const normalizeLocalUnread = normalizeSeqMap
 
 /**
  * 从快照推导状态栏行。
@@ -297,14 +306,8 @@ export function failureKindOf(projection, ackedSeq) {
 
 /**
  * 归一化持久化的报错确认表：只保留整数 seq，丢掉坏值。
- * @param {unknown} value 读到的 JSON。
- * @returns {object} `{ [sessionId]: number }`。
+ *
+ * 实现见 {@link normalizeSeqMap}（与「后台完成」记账共用一份）。
+ * @type {(value: unknown) => object}
  */
-export function normalizeAckErrors(value) {
-  const out = {}
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return out
-  for (const [id, seq] of Object.entries(value)) {
-    if (typeof id === 'string' && id !== '' && Number.isInteger(seq) && seq >= 0) out[id] = seq
-  }
-  return out
-}
+export const normalizeAckErrors = normalizeSeqMap

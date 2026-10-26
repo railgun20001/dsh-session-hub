@@ -16,6 +16,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { deriveHubRows, failureKindOf, projectionOf, STATE_LABELS } from '../src/hub-model.js'
+import { HUB_STRINGS } from '../src/hub-strings.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SOURCE = readFileSync(join(HERE, '..', 'src', 'hub-ui.js'), 'utf8')
@@ -42,10 +43,12 @@ function reactStub() {
  * @returns {Function} createSessionHubRail。
  */
 function loadFactory() {
+  // 组件里的可见文案来自 HUB_STRINGS（单一来源），所以这里把它作为自由变量注入。
   // eslint-disable-next-line no-new-func
-  return new Function('deriveHubRows', 'STATE_LABELS', `${SOURCE}\nreturn createSessionHubRail`)(
+  return new Function('deriveHubRows', 'STATE_LABELS', 'HUB_STRINGS', `${SOURCE}\nreturn createSessionHubRail`)(
     deriveHubRows,
     STATE_LABELS,
+    HUB_STRINGS,
   )
 }
 
@@ -55,9 +58,10 @@ function loadFactory() {
  */
 function loadHintFactory() {
   // eslint-disable-next-line no-new-func
-  return new Function('projectionOf', 'failureKindOf', `${SOURCE}\nreturn createSessionHubRowHint`)(
+  return new Function('projectionOf', 'failureKindOf', 'HUB_STRINGS', `${SOURCE}\nreturn createSessionHubRowHint`)(
     projectionOf,
     failureKindOf,
+    HUB_STRINGS,
   )
 }
 

@@ -59,7 +59,11 @@
  */
 
 import { createWindowRaiser, resolveTargetProcessId, isOverlayState, WORKER_PROTOCOL } from './lib/raise-window.js'
+import { PROJECTION_KEY, ROUTE_PATH } from './src/hub-identity.js'
 import { readFileSync } from 'node:fs'
+
+/** 投影键与路由前缀与客户端半共用一份定义（src/hub-identity.js），此处原样再导出。 */
+export { PROJECTION_KEY, ROUTE_PATH }
 
 /**
  * 宿主半的构建版本，直接读同目录的 package.json（单一事实来源）。
@@ -102,19 +106,16 @@ const MESSAGE_LIMIT = 200
 const ACCOUNT_SIGNED_OUT = 'ACCOUNT_SIGNED_OUT'
 
 /**
- * 本插件注册的会话投影键。宿主半与客户端半共用这一个字符串。
- */
-export const PROJECTION_KEY = 'hubTurnOutcome'
-
-/**
- * 客户端回调用的路由前缀。
+ * 会话投影键与路由前缀。
  *
- * 客户端用**文档相对**路径请求（`dsh-session-hub/...`，不带前导斜杠）：桌面端页面
- * 是 `dsh-app://app/`，其非静态路径会被 shell 同源转发到宿主，而 Web 端页面带
+ * 这两个字符串与客户端半共用同一份定义（`src/hub-identity.js`），本文件只做 re-export，
+ * 不再各自写一份字面量——以前注释写着「两半共用这一个字符串」，实际却是两处字面量。
+ *
+ * 路由的调用约定：客户端用**文档相对**路径请求（`dsh-session-hub/...`，不带前导斜杠）：
+ * 桌面端页面是 `dsh-app://app/`，其非静态路径会被 shell 同源转发到宿主；Web 端页面带
  * `<base href="./">`，相对路径能正确落在部署前缀下（与 dsh-client-ui-skill-explorer
  * 的 `api/...` 同款约定）。
  */
-export const ROUTE_PATH = '/dsh-session-hub'
 
 /** 单次 taskbar 请求体上限：只接受 `{"state":"red"}` 这种几十字节的 JSON。 */
 const MAX_BODY_BYTES = 1024
