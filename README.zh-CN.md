@@ -268,12 +268,19 @@ plugins/dsh-session-hub/
 │   ├── raise-window.js      宿主半：窗口前置 + 任务栏状态点（PowerShell worker）
 │   └── client.js            客户端 bundle（build/bundle.mjs 生成，勿手改）
 ├── src/
+│   ├── hub-identity.js      插件 id / 投影键 / 路由前缀 / 签名头 / 存储键（两半共用）
+│   ├── hub-strings.js       界面文案 zh/en（单一来源）
 │   ├── hub-model.js         状态栏 / 任务栏纯逻辑（可单测）
 │   ├── notify-core.js       通知边沿引擎（纯逻辑，可单测）
-│   ├── hub-scroll.js        侧栏会话行定位与滚动（纯逻辑，可单测）
-│   ├── hub-ui.js            顶部状态栏 React 组件
+│   ├── hub-scroll.js        侧栏会话行定位、滚动与揭示控制器（可单测）
+│   ├── hub-json-store.js    localStorage JSON 读写（读失败回落、写失败只告警）
+│   ├── hub-stores.js        配置 / 水位 / 报错确认 / 后台完成记账
+│   ├── hub-notify.js        通知落地：短 tag、跨标签页去重、落地诊断日志
+│   ├── hub-host.js          宿主半路由：前置窗口 / 任务栏状态 / 在线探活
+│   ├── hub-ui.js            React 状态栏与行悬停提示组件
+│   ├── hub-slots.js         三处插槽注册
 │   └── client-main.js       接线：服务 → 模型 → 通知 / 状态栏 / 任务栏
-├── build/bundle.mjs         把五个源文件内联成单文件浏览器 bundle（--check 校验）
+├── build/bundle.mjs         把 src/ 下的源文件按顺序内联成单文件浏览器 bundle（--check 校验）
 ├── test/                    135 个用例（node:test，零依赖）
 ├── locale/{zh,en}.json      插件管理器的标题与描述
 ├── icon.svg                 插件图标
