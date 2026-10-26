@@ -372,7 +372,7 @@ test('新一轮完成弹「任务完成」，点通知跳回会话并把窗口�
 
     assert.equal(harness.state.notifications.length, 1)
     const toast = harness.state.notifications[0]
-    assert.equal(toast.title, 'DSH · 任务完成')
+    assert.equal(toast.title, '🟢 DSH · 任务完成')
     assert.equal(toast.options.body, '会话 s1')
     // tag 只放身份哈希：长 tag（几十个字符）会被 Chromium 静默丢弃整条通知，
     // 所以 tag 必须短且只含字母数字（详见 src/client-main.js 的 shortToastTag）。
@@ -480,6 +480,29 @@ test('tag 长度与身份长短无关：超长会话 id 也只产出 15 个字�
   }
 })
 
+test('通知标题带彩色圆点标识，可用 colorMarkers 关掉', async () => {
+  const harness = await createHarness({
+    sessions: [sessionRow('s1')],
+    projections: { s1: turnEnd(10, 'completed') },
+  })
+  try {
+    await settle()
+    harness.setProjection('s1', turnEnd(12, 'completed'))
+    await settle()
+    assert.equal(harness.state.notifications[0].title, '🟢 DSH · 任务完成')
+
+    // 关掉后回到纯文本标题：颜色只是增益，不该变成强迫项。
+    globalThis.__DSH_SESSION_HUB__.setConfig({ colorMarkers: false })
+    harness.setProjection('s1', turnEnd(13, 'completed'))
+    await settle()
+    assert.equal(harness.state.notifications[1].title, 'DSH · 任务完成')
+  } finally {
+    globalThis.__DSH_SESSION_HUB__.setConfig({ colorMarkers: true })
+    harness.dispose()
+    harness.restore()
+  }
+})
+
 test('系统侧拒绝时记 failed，不再一律吞成 no-event', async () => {
   const harness = await createHarness({
     sessions: [sessionRow('s1')],
@@ -539,7 +562,7 @@ test('运行失败弹「任务失败」，正文带错误信息', async () => {
     await settle()
 
     assert.equal(harness.state.notifications.length, 1)
-    assert.equal(harness.state.notifications[0].title, 'DSH · 任务失败')
+    assert.equal(harness.state.notifications[0].title, '🔴 DSH · 任务失败')
     assert.equal(harness.state.notifications[0].options.body, '会话 s1：连接被重置')
   } finally {
     harness.dispose()
@@ -555,7 +578,7 @@ test('待回答 / 待审批弹常驻通知', async () => {
     await settle()
 
     assert.equal(harness.state.notifications.length, 1)
-    assert.equal(harness.state.notifications[0].title, 'DSH · 需要你回应')
+    assert.equal(harness.state.notifications[0].title, '🟡 DSH · 需要你回应')
     assert.equal(harness.state.notifications[0].options.body, '需要你回答：会话 s1')
     assert.equal(harness.state.notifications[0].options.requireInteraction, true)
 
@@ -601,7 +624,7 @@ test('宿主半确证缺失时才退化：running 下降沿兜底成「完成」
     harness.setRow('s1', { running: false })
     await settle()
     assert.equal(harness.state.notifications.length, 1)
-    assert.equal(harness.state.notifications[0].title, 'DSH · 任务完成')
+    assert.equal(harness.state.notifications[0].title, '🟢 DSH · 任务完成')
   } finally {
     harness.dispose()
     harness.restore()
@@ -832,7 +855,7 @@ test('当前会话在窗口被别的应用盖住时完成：弹完成通知，�
 
     // 1) Windows 通知照常弹：当前会话不再因为「正在看」而被静默。
     assert.equal(harness.state.notifications.length, 1)
-    assert.equal(harness.state.notifications[0].title, 'DSH · 任务完成')
+    assert.equal(harness.state.notifications[0].title, '🟢 DSH · 任务完成')
     assert.equal(harness.state.notifications[0].options.body, '会话 s1')
 
     // 2) 官方 completionUnread 对主视图会话不置位，靠插件补记出「待查看」绿行。
@@ -1033,7 +1056,7 @@ test('诊断入口可以弹测试通知，并能主动探活宿主半', async ()
     assert.equal(await api.pingHost(), 'present')
     assert.equal(api.testNotification(), true)
     assert.equal(harness.state.notifications.length, 1)
-    assert.equal(harness.state.notifications[0].title, 'DSH · 通知测试')
+    assert.equal(harness.state.notifications[0].title, '🔔 DSH · 通知测试')
   } finally {
     harness.dispose()
     harness.restore()

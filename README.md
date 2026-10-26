@@ -163,6 +163,27 @@
 （`dsh` + 12 位十六进制哈希 = 15 个字符，取自 `<插件>:<会话 id>#<事件键>`）。
 多标签页共享 `localStorage` 时同一事件只弹一条。
 
+### 通知上的颜色标识
+
+标题前带一个彩色圆点，与状态栏 chip、任务栏状态点**同源同色**，扫一眼就知道是哪一类：
+
+| 类别 | 标识 | 标题 |
+|---|---|---|
+| 完成 | 🟢 | `DSH · 任务完成` |
+| 需要你回应（提问 / 待审批 / 计划待审） | 🟡 | `DSH · 需要你回应` |
+| 失败（含中断） | 🔴 | `DSH · 任务失败` |
+| 达到输出上限 | 🟠 | `DSH · 达到输出上限` |
+| 手动停止（默认不通知） | ⚪ | `DSH · 任务已停止` |
+| `testNotification()` 测试通知 | 🔔 | `DSH · 通知测试` |
+
+**为什么是 emoji 而不是彩色图标**：Windows 的 toast 图标固定取**应用图标**（AUMID 对应的
+快捷方式），HTML5 `Notification` 的 `icon` 在 Windows 上不会落到 toast 里，`badge` 更是只在
+macOS / Android 实现。要换图标只能放弃 HTML5 Notification、改用宿主半直接发 WinRT toast，
+但那样**点击就回不到页面里**（见第 3 节的取舍），所以颜色只能进文本——Windows 用
+Segoe UI Emoji 把圆点渲染成真实彩色字形。
+
+不想要圆点：`__DSH_SESSION_HUB__.setConfig({ colorMarkers: false })`。
+
 ### 为什么 tag 必须是短哈希（2026-10-26 定位）
 
 Windows 的 toast 对 `tag` 长度有硬限制，**超了会让整条通知在 Chromium 内部被静默丢弃**：

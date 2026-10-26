@@ -586,11 +586,20 @@ function apply(ctx) {
   const showNotification = (notification) => {
     /** 可读的事件身份：`<插件>:<会话>#<事件键>`。只进诊断日志，不直接当 tag（见 {@link shortToastTag}）。 */
     const tagKey = `${PLUGIN_ID}:${notification.sessionId}#${notification.dedupeKey}`
+    /**
+     * 真正交给系统显示的标题：默认带彩色圆点（🟢 完成 / 🟡 等你回应 / 🔴 失败）。
+     *
+     * Windows 的 toast **没有可定制的图标**——图标固定是应用图标，HTML5
+     * `Notification` 的 `icon` / `badge` 在 Windows 上都不落地（见 {@link NOTIFY_MARKERS}），
+     * 所以颜色只能进文本。圆点配色与状态栏 chip、任务栏状态点同源。
+     */
+    const marker = config.colorMarkers === false ? '' : String(notification.marker ?? '')
+    const shownTitle = marker === '' ? notification.title : `${marker} ${notification.title}`
     /** 诊断日志的公共字段。 */
     const base = {
       sessionId: notification.sessionId,
       category: notification.category,
-      title: notification.title,
+      title: shownTitle,
       key: tagKey,
       permission: typeof Notification === 'undefined' ? 'unsupported' : String(Notification.permission),
     }
@@ -600,7 +609,7 @@ function apply(ctx) {
     }
     if (Notification.permission !== 'granted') {
       recordNotify({ ...base, stage: 'permission' })
-      console.warn(`[${PLUGIN_ID}] 通知权限为 ${String(Notification.permission)}，跳过：${notification.title}`)
+      console.warn(`[${PLUGIN_ID}] 通知权限为 ${String(Notification.permission)}，跳过：${shownTitle}`)
       return
     }
     if (!claimEvent(notification.dedupeKey)) {
@@ -623,7 +632,7 @@ function apply(ctx) {
     const tag = shortToastTag(tagKey)
     let toast
     try {
-      toast = new Notification(notification.title, {
+      toast = new Notification(shownTitle, {
         body: notification.body,
         tag,
         // 刻意不传 renotify：它只在「同 tag 替换」时才有意义，而现在根本没有替换。
@@ -657,7 +666,7 @@ function apply(ctx) {
     const onShown = () => settle('shown')
     const onFailed = (event) => {
       settle('failed', event?.error?.message ?? event?.message ?? 'unknown')
-      console.warn(`[${PLUGIN_ID}] 通知显示失败：${notification.title}`)
+      console.warn(`[${PLUGIN_ID}] 通知显示失败：${shownTitle}`)
     }
     /**
      * 订阅一个事件。
@@ -1121,7 +1130,10 @@ function apply(ctx) {
       showNotification({
         sessionId: target,
         dedupeKey: `test:${Date.now()}`,
+        // 借用 `answer` 只是为了常驻（`requireInteraction`）；标识用铃铛而不是黄点，
+        // 免得一条测试通知被看成「真的在等你回应」。
         category: 'answer',
+        marker: NOTIFY_MARKERS.test,
         title: 'DSH · 通知测试',
         body: '点击这条通知应当跳回对应会话',
       })

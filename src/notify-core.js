@@ -75,6 +75,13 @@ export const DEFAULT_CONFIG = Object.freeze({
   freshnessWindowMs: 120000,
   /** 系统提示音。 */
   sound: true,
+  /**
+   * 通知标题前加彩色圆点（🟢 完成 / 🟡 等你回应 / 🔴 失败），与状态栏、任务栏同源。
+   *
+   * Windows 上 toast 图标固定是应用图标，`icon` / `badge` 都没有落点，所以颜色只能靠
+   * 文本里的 emoji（见 {@link NOTIFY_MARKERS}）。不想要可以关掉。
+   */
+  colorMarkers: true,
   /** 点击通知时请求宿主半把桌面窗口提到前台（见 lib/raise-window.js）。 */
   raiseWindow: true,
   /** 水位表保留条数上限（按 updatedAt 新的优先）。 */
@@ -192,30 +199,55 @@ export function shouldSilence({ focused, isCurrent, config }) {
 }
 
 /**
+ * 每个通知类别对应的彩色圆点标识。
+ *
+ * ## 为什么用 emoji 而不是 `icon`
+ *
+ * Windows 的 toast 图标是**应用图标**（取自 AUMID 对应的快捷方式），HTML5
+ * `Notification` 的 `icon` 字段在 Windows 上不会落到 toast 里，`badge` 更是只在
+ * macOS / Android 实现。想在不放弃「点击跳回会话」的前提下（那样只能用宿主半的
+ * WinRT toast，但点击就回不到页面了）给通知加颜色，唯一可靠的落点就是文本本身，
+ * 所以用 emoji 圆点——Windows 用 Segoe UI Emoji 渲染成真正的彩色字形。
+ *
+ * 配色与状态栏 / 任务栏同源：红（失败）> 黄（等你回应）> 绿（完成）。
+ * @type {Readonly<Record<string, string>>}
+ */
+export const NOTIFY_MARKERS = Object.freeze({
+  completed: '🟢',
+  failed: '🔴',
+  answer: '🟡',
+  stopped: '⚪',
+  'max-tokens': '🟠',
+  /** 手动测试通知：不是状态变化，用铃铛而不是状态色，避免被误读成真事件。 */
+  test: '🔔',
+})
+
+/**
  * 生成一条通知的标题与正文。
  * @param {object} args 输入。
  * @param {string} args.category 通知类别。
  * @param {string} args.title 会话展示标题。
  * @param {object|null} args.projection 该会话的 hubTurnOutcome 投影值。
  * @param {object|null} args.pending pendingInteraction 值。
- * @returns {{category: string, title: string, body: string}} 通知文案。
+ * @returns {{category: string, marker: string, title: string, body: string}} 通知文案（`marker` 为彩色圆点，可能为空串）。
  */
 export function describeNotification({ category, title, projection, pending }) {
   const name = typeof title === 'string' && title.trim() !== '' ? title : '未命名会话'
+  const marker = NOTIFY_MARKERS[category] ?? ''
   if (category === 'answer') {
     const kind = pending?.kind
     const what = kind === 'approval' ? '需要你批准' : kind === 'plan-review' ? '有一个计划待审' : '需要你回答'
-    return { category, title: 'DSH · 需要你回应', body: `${what}：${name}` }
+    return { category, marker, title: 'DSH · 需要你回应', body: `${what}：${name}` }
   }
   if (category === 'failed') {
     const message = typeof projection?.message === 'string' && projection.message !== '' ? projection.message : null
     const code = typeof projection?.code === 'string' && projection.code !== '' ? projection.code : null
     const suffix = message !== null ? `：${message}` : (code !== null ? `（${code}）` : '')
-    return { category, title: 'DSH · 任务失败', body: `${name}${suffix}` }
+    return { category, marker, title: 'DSH · 任务失败', body: `${name}${suffix}` }
   }
-  if (category === 'stopped') return { category, title: 'DSH · 任务已停止', body: name }
-  if (category === 'max-tokens') return { category, title: 'DSH · 达到输出上限', body: name }
-  return { category, title: 'DSH · 任务完成', body: name }
+  if (category === 'stopped') return { category, marker, title: 'DSH · 任务已停止', body: name }
+  if (category === 'max-tokens') return { category, marker, title: 'DSH · 达到输出上限', body: name }
+  return { category, marker, title: 'DSH · 任务完成', body: name }
 }
 
 /**
