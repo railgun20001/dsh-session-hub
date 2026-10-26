@@ -22,10 +22,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 插件声明 engines.node >= 20；Windows 是主要目标平台，Linux 用于守住
-        # 「纯逻辑层不依赖平台」这条约束。
+        # Windows 是主要目标平台，Linux 用于守住「纯逻辑层不依赖平台」这条约束。
+        # 只测 22 / 24：GitHub 已在回收 Node 20 的运行环境（20 的 ubuntu 作业会被
+        # 直接 SIGTERM，日志只说 runner shutdown），而这套代码用的都是 20 起就稳定的
+        # API；engines.node 仍声明 >= 20，代表运行时最低要求。
         os: [windows-latest, ubuntu-latest]
-        node: [20, 24]
+        node: [22, 24]
     steps:
       - uses: actions/checkout@v4
 
