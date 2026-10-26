@@ -17,6 +17,7 @@ import {
   hubTurnOutcomeSchema,
   inject,
   name,
+  PLUGIN_ID,
   PROJECTION_KEY,
   ROUTE_HEADER,
   ROUTE_PATH,
@@ -217,7 +218,7 @@ test('路由只认 POST，ping / debug / raise / warmup / taskbar / 未知动作
 
   const ping = callRoute(handler, 'POST', '/dsh-session-hub/ping')
   assert.equal(ping.status, 200)
-  assert.equal(ping.body.host, 'session-hub')
+  assert.equal(ping.body.host, PLUGIN_ID)
   assert.equal(ping.body.projectionKey, 'hubTurnOutcome')
   assert.equal(ping.body.raiserRunning, false)
   assert.equal(ping.body.overlayState, 'none')

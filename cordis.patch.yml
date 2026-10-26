@@ -8,4 +8,4 @@
 # 这里不需要重复。
 - insert:
     - id: session-hub
-      name: dsh-session-hub
+      name: dsh-session-status-hub

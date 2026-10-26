@@ -60,12 +60,12 @@
 
 import { createWindowRaiser, resolveTargetProcessId, isOverlayState, WORKER_PROTOCOL } from './lib/raise-window.js'
 import {
-  PROJECTION_KEY, ROUTE_PATH, ROUTE_HEADER, ROUTE_HEADER_VALUE,
+  PLUGIN_ID, PROJECTION_KEY, ROUTE_PATH, ROUTE_HEADER, ROUTE_HEADER_VALUE,
 } from './src/hub-identity.js'
 import { readFileSync } from 'node:fs'
 
 /** 投影键、路由前缀与签名头与客户端半共用一份定义（src/hub-identity.js），此处原样再导出。 */
-export { PROJECTION_KEY, ROUTE_PATH, ROUTE_HEADER }
+export { PLUGIN_ID, PROJECTION_KEY, ROUTE_PATH, ROUTE_HEADER }
 
 /**
  * 宿主半的构建版本，直接读同目录的 package.json（单一事实来源）。
@@ -204,7 +204,10 @@ export function createRouteHandler(raiser, diagnostics) {
     if (action === 'ping') {
       req.resume?.()
       respond(res, 200, {
-        host: name,
+        // 必须是客户端半用来校验身份的那个 id（PLUGIN_ID），不是 Cordis 的插件名 `name`。
+        // 这两者曾经不一致（`session-hub` vs `dsh-session-hub`），导致客户端把「宿主半在」
+        // 误判成「路由不存在」——只有在还没有任何会话投影值时才走探活，所以一直没被发现。
+        host: PLUGIN_ID,
         version: VERSION,
         projectionKey: PROJECTION_KEY,
         raiserRunning: raiser.isRunning?.() === true,

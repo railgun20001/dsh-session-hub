@@ -16,9 +16,17 @@
 
 /**
  * 插件 id，同时是：
- *   - 客户端 bundle 注册进 `window.__ModuleLoader__` 的 id（必须与 package.json 的 name 一致）；
  *   - 客户端调宿主半路由的路径前缀（文档相对路径 `dsh-session-hub/<action>`）；
+ *   - 所有 localStorage 键的前缀（配置 / 水位 / 确认表 / 待查看记账）；
+ *   - `/ping` 里宿主半自报的身份，客户端据此判断「宿主半在不在」；
  *   - 所有日志行的标签。
+ *
+ * ## 它不等于 npm 包名
+ *
+ * npm 上 `dsh-session-hub` 已被别的插件占用，本插件发布名是 `dsh-session-status-hub`
+ * （见 package.json 与 cordis.patch.yml；注册进 `window.__ModuleLoader__` 的 id 也取包名）。
+ * 而这个 id 是**线上与存储身份**：改它会让所有已存配置与补记作废、并要同步改宿主半的
+ * 路由前缀，收益为零，所以刻意保持不变。
  * @type {string}
  */
 export const PLUGIN_ID = 'dsh-session-hub'

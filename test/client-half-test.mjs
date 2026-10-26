@@ -301,7 +301,7 @@ function workspaceCtx(harness, opened, workspaces) {
 test('bundle 声明了正确的注册 id 与服务依赖', async () => {
   const harness = await createHarness()
   try {
-    assert.equal(harness.state.registration.id, 'dsh-session-hub')
+    assert.equal(harness.state.registration.id, JSON.parse(readFileSync(join(HERE, '..', 'package.json'), 'utf8')).name)
     assert.deepEqual(harness.exports.inject, ['sessions', 'uiSession'])
   } finally {
     harness.dispose()

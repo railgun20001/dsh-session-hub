@@ -79,6 +79,18 @@ always use the app icon, so text is the only place colour can live.
 
 ## Install
 
+> Naming: the **npm package is `dsh-session-status-hub`** (`dsh-session-hub` was already taken
+> on npm by another plugin); the repository name and the plugin's internal id stay
+> `dsh-session-hub`.
+
+**Option 1 — npm**
+
+```powershell
+npm install dsh-session-status-hub
+```
+
+**Option 2 — from source.** Clone (or download) the repo anywhere:
+
 ```powershell
 git clone https://github.com/railgun20001/dsh-session-hub.git
 ```
@@ -219,6 +231,10 @@ Session at all.
 
 ## Security and privacy
 
+- **Naming**: the npm package is `dsh-session-status-hub` (the plain name was taken);
+  `cordis.patch.yml`'s `name` and the `window.__ModuleLoader__` registration id both use the
+  package name, while `PLUGIN_ID` (route prefix, `localStorage` keys, log tags) deliberately
+  stays `dsh-session-hub` — renaming it would orphan every stored setting for no benefit.
 - **No outbound network calls.** The plugin only talks to the local host half
   (`dsh-session-hub/*` same-origin routes) — no telemetry, no analytics, no third parties.
 - **Everything stays on this machine**: config, watermarks, error acks, unread records and

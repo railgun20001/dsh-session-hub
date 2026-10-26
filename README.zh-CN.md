@@ -304,7 +304,16 @@ plugins/dsh-session-hub/
 
 ## 6. 安装
 
-把仓库克隆（或下载解压）到本机任意目录：
+> 命名说明：**npm 包名是 `dsh-session-status-hub`**（`dsh-session-hub` 在 npm 上已被别的插件占用），
+> 仓库名与插件内部 id 仍是 `dsh-session-hub`。下文凡涉及包名一律用 npm 名，涉及本地目录用仓库名。
+
+**方式一：npm**
+
+```powershell
+npm install dsh-session-status-hub
+```
+
+**方式二：从源码装**。把仓库克隆（或下载解压）到本机任意目录：
 
 ```powershell
 git clone https://github.com/railgun20001/dsh-session-hub.git
@@ -312,9 +321,8 @@ git clone https://github.com/railgun20001/dsh-session-hub.git
 
 然后二选一：
 
-- **方式一：DSH 的「插件」页** → 添加本地插件 → 选择 `dsh-session-hub` 目录；
-- **方式二：插件管理器**（如果所在会话提供 `plugin_manager` 工具）→ `install_bundle`
-  → 目标指向该目录。
+- 用 DSH 的「插件」页 → 添加本地插件 → 选择 `dsh-session-hub` 目录；
+- 用插件管理器（如果所在会话提供 `plugin_manager` 工具）→ `install_bundle` → 目标指向该目录。
 
 安装后：
 
@@ -460,6 +468,9 @@ Invoke-RestMethod -Uri "$base/dsh-session-hub/debug" -Method POST -Headers $h
 
 - **零 npm 依赖**：宿主半只用 `node:child_process` / `node:fs`；客户端半只用浏览器 API、
   React（由客户端模块表提供）与 DSH 服务。
+- **命名**：npm 包名 `dsh-session-status-hub`（重名所迫），`cordis.patch.yml` 的 `name` 与
+  `window.__ModuleLoader__` 的注册 id 都取包名；而 `PLUGIN_ID`（路由前缀、localStorage 键、
+  日志标签）刻意保持 `dsh-session-hub` 不变——改它会让已存的配置与补记作废，收益为零。
 - **宿主半会起一个 PowerShell 进程**（窗口前置 + 任务栏点），可用 `raiseWindow: false`
   关闭窗口前置（任务栏点仍需要 worker）；worker 空闲 10 分钟退出，状态点亮着时保持。
 - **宿主半挂内部路由**：`POST /dsh-session-hub/{ping,debug,warmup,raise,taskbar}`。

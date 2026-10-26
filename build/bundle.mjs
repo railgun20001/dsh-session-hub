@@ -32,8 +32,7 @@ import { fileURLToPath } from 'node:url'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(HERE, '..')
 
-/** 包名：注册到 __ModuleLoader__ 的 id，必须与 package.json 的 name 一致。 */
-const PACKAGE_NAME = 'dsh-session-hub'
+
 
 /**
  * 参与内联的源文件，**顺序即作用域顺序**。
@@ -105,6 +104,11 @@ function build() {
   // 必须能一眼看出来。
   const pkg = JSON.parse(readFileSync(PACKAGE_JSON, 'utf8'))
   const version = typeof pkg.version === 'string' && pkg.version !== '' ? pkg.version : 'unknown'
+  // 注册 id 必须与 package.json 的 name 一致（DSH 用包名 require 客户端半），
+  // 所以直接读它，而不是在这里再写一份字面量——改包名时不会漏掉这里。
+  const packageName = typeof pkg.name === 'string' && pkg.name !== ''
+    ? pkg.name
+    : (() => { throw new Error('package.json 缺少 name') })()
 
   const header = `/**
  * dsh-session-hub —— 客户端 bundle（由 build/bundle.mjs 生成，请不要手改）
@@ -117,7 +121,7 @@ ${SOURCES.map((entry) => ` *   - src/${entry.file.padEnd(20)}${entry.label}`).jo
  * import/require 时物化，并作为 Cordis 插件激活（apply + inject）。
  */
 window.__ModuleLoader__.load({
-\tid: ${JSON.stringify(PACKAGE_NAME)},
+\tid: ${JSON.stringify(packageName)},
 \tfactory: (require) => {
 \t\tvar module = { exports: {} };
 \t\tvar exports = module.exports;
