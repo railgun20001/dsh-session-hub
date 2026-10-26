@@ -274,7 +274,7 @@ plugins/dsh-session-hub/
 │   ├── hub-ui.js            顶部状态栏 React 组件
 │   └── client-main.js       接线：服务 → 模型 → 通知 / 状态栏 / 任务栏
 ├── build/bundle.mjs         把五个源文件内联成单文件浏览器 bundle（--check 校验）
-├── test/                    101 个用例（node:test，零依赖）
+├── test/                    135 个用例（node:test，零依赖）
 ├── locale/{zh,en}.json      插件管理器的标题与描述
 ├── icon.svg                 插件图标
 ├── cordis.patch.yml         bundle patch：插入 session-hub 行
@@ -373,7 +373,7 @@ __DSH_SESSION_HUB__.setConfig({ silenceAllWhenFocused: true })
 
 ```powershell
 cd path/to/dsh-session-hub
-npm run check      # 1) 校验 lib/client.js 与源码一致  2) 跑 101 个用例
+npm run check      # 1) 校验 lib/client.js 与源码一致  2) 跑 135 个用例
 ```
 
 DSH 窗口 DevTools 控制台：
@@ -406,9 +406,10 @@ __DSH_SESSION_HUB__.pingHost()         // 'present' / 'absent' / 'unknown'
 # 源（协议 + 主机 + 端口）跟着当前 DSH 实例走：页面是什么源，路由就在那个源上。
 # 例如 Web 端在浏览器里打开 http://127.0.0.1:8779/ ，就用这个源；桌面端由 shell 同源转发。
 $base = 'http://127.0.0.1:8779'
-Invoke-RestMethod -Uri "$base/dsh-session-hub/ping"  -Method POST
-Invoke-RestMethod -Uri "$base/dsh-session-hub/debug" -Method POST
-# 注意：这两条路由没有额外鉴权（见第 11 节）；桌面端页面内的 fetch 是已授权的同源通路。
+$h = @{ 'x-dsh-session-hub' = '1' }   # 内部路由要求签名头，缺了会 403
+Invoke-RestMethod -Uri "$base/dsh-session-hub/ping"  -Method POST -Headers $h
+Invoke-RestMethod -Uri "$base/dsh-session-hub/debug" -Method POST -Headers $h
+# 注意：签名头只用来挡跨站触发，不是鉴权（见第 11 节）；桌面端页面内的 fetch 是同源通路。
 ```
 
 手工验收：
@@ -462,7 +463,8 @@ Invoke-RestMethod -Uri "$base/dsh-session-hub/debug" -Method POST
 - **宿主半会起一个 PowerShell 进程**（窗口前置 + 任务栏点），可用 `raiseWindow: false`
   关闭窗口前置（任务栏点仍需要 worker）；worker 空闲 10 分钟退出，状态点亮着时保持。
 - **宿主半挂内部路由**：`POST /dsh-session-hub/{ping,debug,warmup,raise,taskbar}`。
-  同源、无额外鉴权；只做「提窗口 / 画状态点 / 只读诊断」，不读任何用户数据。
+  同源，且只接受 POST + 签名头（见第 11 节）；只做「提窗口 / 画状态点 / 只读诊断」，
+  不读任何用户数据。
 
 ## 11. 安全与隐私
 
@@ -471,9 +473,15 @@ Invoke-RestMethod -Uri "$base/dsh-session-hub/debug" -Method POST
 - **数据只落本机**：配置、水位、报错确认、补记的「待查看」与通知落地日志全部存在浏览器
   `localStorage`（键前缀 `dsh-session-hub/`）；会话投影的检查点由 DSH 自己的投影注册表
   落盘。插件不读会话正文，只读「最后一个回合的结局」与几个状态布尔值。
-- **内部路由没有额外鉴权**：`/raise`、`/warmup`、`/taskbar` 只影响窗口前置与任务栏图标，
-  不返回用户数据（`/debug` 只回投影键、版本与进程状态）。请不要把 DSH 的 Web 端口暴露到
+- **内部路由要求签名头**：客户端每条请求都带 `x-dsh-session-hub: 1`，宿主半见到才处理
+  （缺头直接 403）。这**不是鉴权**，而是用来挡「跨站触发」：自定义头会把浏览器请求升级成
+  需要预检的跨站请求，而宿主半不返回任何 CORS 响应头，于是别的网页即使能 POST 到本机端口
+  也到不了 handler——`/raise`（把窗口弹到前台）与 `/warmup`（拉起 PowerShell worker）
+  因此不会被任意网页反复触发。端点本身仍只影响窗口与任务栏图标，不返回用户数据
+  （`/debug` 只回投影键、版本与进程状态）。即便如此，也不要把 DSH 的 Web 端口暴露到
   不可信网络。
+- **签名头是本版新增**：宿主半与客户端半需要同时是当前版本或更新；旧客户端半（不带该头）
+  会被新宿主半拒绝，控制台会明确提示「缺签名头，刷新页面即可对齐」。
 - **宿主半会起一个 PowerShell 进程**（`powershell.exe -NoProfile -EncodedCommand`，
   不落脚本文件、不改执行策略）。worker 脚本全文见 `lib/raise-window.js` 的
   `WORKER_SCRIPT`；不需要窗口前置时可用 `raiseWindow: false` 关掉。

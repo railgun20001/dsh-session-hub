@@ -59,11 +59,13 @@
  */
 
 import { createWindowRaiser, resolveTargetProcessId, isOverlayState, WORKER_PROTOCOL } from './lib/raise-window.js'
-import { PROJECTION_KEY, ROUTE_PATH } from './src/hub-identity.js'
+import {
+  PROJECTION_KEY, ROUTE_PATH, ROUTE_HEADER, ROUTE_HEADER_VALUE,
+} from './src/hub-identity.js'
 import { readFileSync } from 'node:fs'
 
-/** 投影键与路由前缀与客户端半共用一份定义（src/hub-identity.js），此处原样再导出。 */
-export { PROJECTION_KEY, ROUTE_PATH }
+/** 投影键、路由前缀与签名头与客户端半共用一份定义（src/hub-identity.js），此处原样再导出。 */
+export { PROJECTION_KEY, ROUTE_PATH, ROUTE_HEADER }
 
 /**
  * 宿主半的构建版本，直接读同目录的 package.json（单一事实来源）。
@@ -106,9 +108,9 @@ const MESSAGE_LIMIT = 200
 const ACCOUNT_SIGNED_OUT = 'ACCOUNT_SIGNED_OUT'
 
 /**
- * 会话投影键与路由前缀。
+ * 会话投影键、路由前缀与签名头。
  *
- * 这两个字符串与客户端半共用同一份定义（`src/hub-identity.js`），本文件只做 re-export，
+ * 这些字符串与客户端半共用同一份定义（`src/hub-identity.js`），本文件只做 re-export，
  * 不再各自写一份字面量——以前注释写着「两半共用这一个字符串」，实际却是两处字面量。
  *
  * 路由的调用约定：客户端用**文档相对**路径请求（`dsh-session-hub/...`，不带前导斜杠）：
@@ -121,14 +123,55 @@ const ACCOUNT_SIGNED_OUT = 'ACCOUNT_SIGNED_OUT'
 const MAX_BODY_BYTES = 1024
 
 /**
- * 造一个路由处理器：只认 POST，永远快速返回，绝不因为前置/任务栏失败而报错。
+ * 客户端请求必须携带签名头（见 hub-identity 的 {@link ROUTE_HEADER}）。
+ *
+ * ## 为什么需要它
+ *
+ * 这几条路由挂在 DSH 自己的 webServer 上，与页面同源同端口，本身**没有鉴权**。它们只能
+ * 做「提窗口 / 画任务栏点 / 只读诊断」，读不到用户数据，所以危害有限；但「有限」不等于
+ * 「可以不管」：
+ *
+ *   - 任意网页都能向 `http://127.0.0.1:<端口>/dsh-session-hub/raise` 发一个
+ *     `mode: no-cors` 的简单 POST——读不到响应，但**副作用已经发生**（窗口被弹到前台）；
+ *     同理可以反复 `/warmup` 让 PowerShell worker 反复启动。
+ *   - 若把 DSH 的 Web 端口暴露到局域网/反向代理，同网段任何人都能触发上面这些。
+ *
+ * ## 为什么是自定义头而不是 Origin 白名单
+ *
+ * 自定义头会让浏览器把请求升级成**需要预检**的跨站请求；服务端不返回任何
+ * `Access-Control-Allow-*`，于是跨站请求根本到不了 handler——一次挡住所有浏览器来源的
+ * CSRF，且不需要猜桌面端（`dsh-app://app/` 经 shell 同源转发）的 `Origin` 到底是 `null`
+ * 还是自定义协议。真正的 Origin 校验要等实测过桌面端的请求头再加。
+ *
+ * 代价：宿主半与客户端半必须同时是这个版本或更新，否则旧客户端（不带该头）会被拒。
+ * 这是刻意的取舍——两半版本错位本来就会在 `/ping` 里被明确报出来。
+ */
+
+/**
+ * 判断请求是否带了签名头。
+ *
+ * node 的 `req.headers` 会把重复的头合并成数组，所以两种形状都要认。
+ * @param {object} req node:http 请求。
+ * @returns {boolean} 是否合法。
+ */
+function hasRouteHeader(req) {
+  const headers = req?.headers
+  if (headers === null || typeof headers !== 'object') return false
+  const value = headers[ROUTE_HEADER]
+  if (typeof value === 'string') return value === ROUTE_HEADER_VALUE
+  return Array.isArray(value) && value.includes(ROUTE_HEADER_VALUE)
+}
+
+/**
+ * 造一个路由处理器：只认 POST + 签名头，永远快速返回，绝不因为前置/任务栏失败而报错。
  *
  * - `POST <前缀>/ping`    ：宿主半在线探针（无副作用）；
  * - `POST <前缀>/debug`   ：只读诊断：投影键是否注册、每个在挂会话的投影键与当前值；
  * - `POST <前缀>/raise`   ：把桌面窗口提到前台（通知 / 状态栏被点击时由客户端调用）；
  * - `POST <前缀>/warmup`  ：只预热 PowerShell worker（把 Add-Type 的编译时间提前付掉）；
  * - `POST <前缀>/taskbar` ：设置 / 清除任务栏状态点，body `{ "state": "red|yellow|green|none" }`。
- * 其他方法与路径一律 404/405。
+ *
+ * 方法不对 → 405；缺签名头 → 403（见 {@link ROUTE_HEADER}）；未知动作 → 404。
  *
  * @param {{
  *   raise: (pid: number) => boolean,
@@ -147,8 +190,14 @@ export function createRouteHandler(raiser, diagnostics) {
       ? url.slice(ROUTE_PATH.length + 1).split('?')[0]
       : ''
 
+    // 方法检查排在签名头之前：跨站预检（OPTIONS）应当得到 405，而不是「缺签名头」。
     if (req.method !== 'POST') {
       respond(res, 405, { error: 'method-not-allowed' })
+      return
+    }
+    if (!hasRouteHeader(req)) {
+      req.resume?.()
+      respond(res, 403, { error: 'forbidden', reason: 'missing-header' })
       return
     }
 

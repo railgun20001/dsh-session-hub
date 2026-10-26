@@ -140,7 +140,7 @@ state facts ("this turn finished and you haven't looked"), not interruptions.
 ## Diagnostics
 
 ```powershell
-npm run check     # 1) lib/client.js matches src/  2) 101 test cases
+npm run check     # 1) lib/client.js matches src/  2) 135 test cases
 ```
 
 ```js
@@ -160,8 +160,9 @@ Host half, read-only:
 # routes (the desktop shell forwards same-origin paths to the host). Example: the web UI at
 # http://127.0.0.1:8779/.
 $base = 'http://127.0.0.1:8779'
-Invoke-RestMethod -Uri "$base/dsh-session-hub/ping"  -Method POST
-Invoke-RestMethod -Uri "$base/dsh-session-hub/debug" -Method POST
+$h = @{ 'x-dsh-session-hub' = '1' }   # internal routes require the signature header (403 without it)
+Invoke-RestMethod -Uri "$base/dsh-session-hub/ping"  -Method POST -Headers $h
+Invoke-RestMethod -Uri "$base/dsh-session-hub/debug" -Method POST -Headers $h
 ```
 
 ## Architecture
@@ -177,7 +178,7 @@ dsh-session-hub/
 ├── src/hub-ui.js            React rail + row hint components
 ├── src/client-main.js       wiring: services → model → notifications / rail / taskbar
 ├── build/bundle.mjs         inlines the five sources into one classic-script bundle
-├── test/                    101 node:test cases, zero dependencies
+├── test/                    135 node:test cases, zero dependencies
 ├── locale/{zh,en}.json      plugin manager title and description
 ├── icon.svg                 plugin icon
 ├── cordis.patch.yml         bundle patch inserting the session-hub row
@@ -224,9 +225,18 @@ Session at all.
   the notification landing log live in `localStorage` under the `dsh-session-hub/` prefix.
   The plugin never reads conversation content — only the last turn's outcome and a few state
   booleans.
-- **Internal routes carry no extra auth**: `/raise`, `/warmup`, `/taskbar` only affect the
-  window and the taskbar icon and return no user data (`/debug` returns projection keys,
-  versions and process state). Do not expose the DSH web port to an untrusted network.
+- **Internal routes require a signature header**: every client request carries
+  `x-dsh-session-hub: 1` and the host half only answers when it is present (403 otherwise).
+  This is **not** authentication — it blocks *cross-site triggering*: a custom header turns a
+  browser request into a preflighted cross-site request, and the host half returns no CORS
+  headers, so a random web page that can POST to the local port never reaches the handler.
+  `/raise` (bring the window forward) and `/warmup` (spawn the PowerShell worker) therefore
+  cannot be triggered by arbitrary pages. The endpoints still only affect the window and the
+  taskbar icon and return no user data (`/debug` returns projection keys, versions and process
+  state). Even so, do not expose the DSH web port to an untrusted network.
+- **The signature header is new in this version**: host half and client half must be the same
+  version or newer. An older client half (no header) is rejected by a newer host half, and the
+  console says so explicitly ("missing signature header, reload the page to align").
 - **The host half spawns one PowerShell process** (`-NoProfile -EncodedCommand`, no script
   file written, no execution-policy change). The worker script is in `lib/raise-window.js`;
   set `raiseWindow: false` to skip window raising.

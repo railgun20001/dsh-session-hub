@@ -7,8 +7,24 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-import { createHostBridge, HOST_HALF_RECHECK_MS } from '../src/hub-host.js'
+import { ROUTE_HEADER, ROUTE_HEADER_VALUE } from '../src/hub-identity.js'
+
+const HERE = dirname(fileURLToPath(import.meta.url))
+const SOURCE = readFileSync(join(HERE, '..', 'src', 'hub-host.js'), 'utf8')
+
+// 签名头常量住在 hub-identity（两半共用一份）；bundle 内联后它们在同一作用域，
+// 这里按同样的方式用自由变量注入，避免测试里再抄一份字面量。
+// 载入前去掉 `export` 前缀——这正是 build/bundle.mjs 内联时做的事。
+const INLINED = SOURCE.replace(/^export\s+/gm, '')
+const { createHostBridge, HOST_HALF_RECHECK_MS } = new Function(
+  'ROUTE_HEADER',
+  'ROUTE_HEADER_VALUE',
+  `${INLINED}\nreturn { createHostBridge, HOST_HALF_RECHECK_MS }`,
+)(ROUTE_HEADER, ROUTE_HEADER_VALUE)
 
 /**
  * 造一个桥接器与请求记录器。
@@ -66,6 +82,7 @@ test('任务栏状态：同状态去重，变化才发，force 绕过', () => {
   assert.equal(fetches[0].init.method, 'POST')
   assert.deepEqual(JSON.parse(fetches[0].init.body), { state: 'red' })
   assert.equal(fetches[0].init.headers['content-type'], 'application/json')
+  assert.equal(fetches[0].init.headers[ROUTE_HEADER], ROUTE_HEADER_VALUE, '每条内部请求都必须带签名头')
 
   bridge.pushTaskbar('yellow')
   assert.equal(fetches.length, 2)
@@ -200,4 +217,20 @@ test('探活：一旦确认在线就不再重复请求（哪怕已过退避窗�
   control.now += HOST_HALF_RECHECK_MS * 3
   bridge.checkHostHalf()
   assert.equal(fetches.length, 1)
+})
+
+test('探活：宿主半拒了请求（403 缺签名头）时说明是客户端半旧构建', async () => {
+  const warnings = []
+  const restore = captureConsole('warn', (line) => warnings.push(line))
+  const { bridge } = harness({
+    onFetch: () => ({ ok: false, status: 403, json: () => Promise.resolve({ error: 'forbidden', reason: 'missing-header' }) }),
+  })
+  try {
+    bridge.checkHostHalf(true)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.equal(bridge.hostHalfState(), 'present', '被拒说明宿主半在，只是版本不一致')
+    assert.match(warnings[0], /缺签名头/)
+  } finally {
+    restore()
+  }
 })

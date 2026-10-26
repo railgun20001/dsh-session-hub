@@ -57,6 +57,13 @@ export function createHostBridge({
   let hostHalfCheckedAt = 0
 
   /**
+   * 拼出请求头：内部路由要求带签名头（见 hub-identity 的 {@link ROUTE_HEADER}）。
+   * @param {Record<string, string>} [extra] 额外头（会覆盖同名项）。
+   * @returns {Record<string, string>} 合并后的头。
+   */
+  const signedHeaders = (extra) => ({ [ROUTE_HEADER]: ROUTE_HEADER_VALUE, ...extra })
+
+  /**
    * 发一个「不需要看响应」的 POST（文档相对路径：桌面端由 shell 同源转发，Web 端落在
    * 部署前缀下）。
    * @param {string} path 相对路径，例如 `dsh-session-hub/raise`。
@@ -66,7 +73,12 @@ export function createHostBridge({
   const post = (path, init) => {
     try {
       if (typeof fetchImpl !== 'function') return
-      Promise.resolve(fetchImpl(path, { method: 'POST', keepalive: true, ...init })).catch(() => {})
+      Promise.resolve(fetchImpl(path, {
+        method: 'POST',
+        keepalive: true,
+        ...init,
+        headers: signedHeaders(init?.headers),
+      })).catch(() => {})
     } catch (error) {
       console.debug(`[${pluginId}] 请求宿主半 ${path} 失败`, error)
     }
@@ -131,7 +143,11 @@ export function createHostBridge({
       // 那种情况既不是「在线」也不是「确认不在」——按「无法确认」处理，措辞与网络失败一致。
       let pending
       try {
-        pending = Promise.resolve(fetchImpl(`${pluginId}/ping`, { method: 'POST', keepalive: true }))
+        pending = Promise.resolve(fetchImpl(`${pluginId}/ping`, {
+          method: 'POST',
+          keepalive: true,
+          headers: signedHeaders(),
+        }))
       } catch (error) {
         hostHalfState = 'unknown'
         console.warn(`[${pluginId}] 宿主半探活请求失败，无法确认其状态：${String(error)}`)
@@ -155,6 +171,15 @@ export function createHostBridge({
             console.info(
               `[${pluginId}] 客户端半 v${version} ↔ 宿主半 v${hostVersion} 在线`
               + `（投影键 ${body.projectionKey}）${skew}。`,
+            )
+            return
+          }
+          if (body !== null && typeof body === 'object' && body.error === 'forbidden') {
+            // 宿主半在，只是拒了这次请求（缺签名头）。旧客户端半会遇到这种情况。
+            hostHalfState = 'present'
+            console.warn(
+              `[${pluginId}] 宿主半拒绝了本次请求（缺签名头）：客户端半像是旧构建；`
+              + '刷新页面即可对齐，功能不受影响',
             )
             return
           }

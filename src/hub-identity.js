@@ -36,6 +36,22 @@ export const PROJECTION_KEY = 'hubTurnOutcome'
 export const ROUTE_PATH = '/dsh-session-hub'
 
 /**
+ * 内部路由的签名头名称（值见 {@link ROUTE_HEADER_VALUE}）。
+ *
+ * 两半共用一份：客户端每条请求都带上它，宿主半见到它才处理。自定义头会把浏览器请求
+ * 升级成需要预检的跨站请求，而宿主半不返回任何 CORS 响应头——于是别的网页即使能
+ * POST 到本机端口，也到不了 handler（详见 index.js 里 createRouteHandler 的说明）。
+ * @type {string}
+ */
+export const ROUTE_HEADER = 'x-dsh-session-hub'
+
+/**
+ * 签名头的唯一合法取值。没有语义，只是为了让头「非空且确定」，便于服务端做等值判断。
+ * @type {string}
+ */
+export const ROUTE_HEADER_VALUE = '1'
+
+/**
  * localStorage 键的后缀。
  *
  * 带版本后缀是刻意的：形状一变就改后缀，旧数据自然作废，不需要写迁移代码。

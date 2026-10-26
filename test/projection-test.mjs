@@ -18,6 +18,7 @@ import {
   inject,
   name,
   PROJECTION_KEY,
+  ROUTE_HEADER,
   ROUTE_PATH,
 } from '../index.js'
 import { resolveTargetProcessId } from '../lib/raise-window.js'
@@ -180,13 +181,15 @@ test('apply 向注册表注册一个 stateVersion 为 1 的单元，并挂上路
  * @param {string} method HTTP 方法。
  * @param {string} url 路径。
  * @param {object|undefined} body 请求体（提供时触发 data/end）。
+ * @param {{ headers?: object }} [options] 请求头（缺省带合法签名头）。
  * @returns {object} 捕获到的 status/headers/body。
  */
-function callRoute(handler, method, url, body) {
+function callRoute(handler, method, url, body, options = {}) {
   const captured = {}
   const req = new EventEmitter()
   req.method = method
   req.url = url
+  req.headers = options.headers ?? { [ROUTE_HEADER]: '1' }
   req.resume = () => {}
   req.destroy = () => {}
   const res = {
@@ -259,4 +262,39 @@ test('路由只认 POST，ping / debug / raise / warmup / taskbar / 未知动作
   const captured = callRoute(createRouteHandler(raiser, () => { throw new Error('诊断炸了') }),
     'POST', '/dsh-session-hub/debug')
   assert.match(captured.body.error, /diagnostics failed/)
+})
+
+test('缺少签名头一律 403，且不触发任何窗口 / 任务栏动作', () => {
+  const calls = []
+  const raiser = {
+    warmup: () => { calls.push('warmup'); return true },
+    raise: (pid) => { calls.push(`raise:${pid}`); return true },
+    overlay: (state, pid) => { calls.push(`overlay:${state}:${pid}`); return true },
+    isRunning: () => false,
+    overlayState: () => 'none',
+  }
+  const handler = createRouteHandler(raiser, () => ({ hostHalf: true }))
+
+  for (const action of ['ping', 'debug', 'raise', 'warmup', 'taskbar']) {
+    const body = action === 'taskbar' ? { state: 'red' } : undefined
+    const res = callRoute(handler, 'POST', `${ROUTE_PATH}/${action}`, body, { headers: {} })
+    assert.equal(res.status, 403, `${action} 缺签名头必须被拒`)
+    assert.equal(res.body.error, 'forbidden')
+    assert.equal(res.body.reason, 'missing-header')
+  }
+  assert.deepEqual(calls, [], '被拒的请求不得产生副作用')
+
+  // 头名对但值不对同样拒。
+  const wrongValue = callRoute(handler, 'POST', `${ROUTE_PATH}/raise`, undefined,
+    { headers: { [ROUTE_HEADER]: 'yes' } })
+  assert.equal(wrongValue.status, 403)
+
+  // node 会把重复的头合并成数组：只要包含合法值就放行。
+  const duplicated = callRoute(handler, 'POST', `${ROUTE_PATH}/ping`, undefined,
+    { headers: { [ROUTE_HEADER]: ['1'] } })
+  assert.equal(duplicated.status, 200)
+
+  // 方法不对时仍先报 405：跨站预检（OPTIONS）应当得到 405 而不是「缺签名头」。
+  const preflight = callRoute(handler, 'OPTIONS', `${ROUTE_PATH}/raise`, undefined, { headers: {} })
+  assert.equal(preflight.status, 405)
 })
