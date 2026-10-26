@@ -1,9 +1,28 @@
 {
   "name": "dsh-session-hub",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
-  "description": "DSH 会话状态中心：软件顶端标题栏汇总运行中 / 待回答 / 待查看 / 报错会话，状态变化弹 Windows 通知，并用红黄绿点标记任务栏图标",
+  "description": "DeepSeek Harness 会话状态中心：顶端状态栏汇总运行中 / 待回答 / 待查看 / 报错会话，状态变化弹 Windows 通知，并用红黄绿点标记任务栏图标",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek-harness-plugin",
+    "cordis",
+    "notifications",
+    "taskbar",
+    "session-status"
+  ],
+  "homepage": "https://github.com/railgun20001/dsh-session-hub#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/railgun20001/dsh-session-hub.git"
+  },
+  "bugs": {
+    "url": "https://github.com/railgun20001/dsh-session-hub/issues"
+  },
+  "author": "railgun20001",
+  "license": "MIT",
   "main": "index.js",
   "exports": {
     ".": {
@@ -26,7 +45,9 @@
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
-    "README.md"
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "node build/bundle.mjs",
@@ -50,6 +71,5 @@
   },
   "engines": {
     "node": ">=20"
-  },
-  "license": "MIT"
+  }
 }

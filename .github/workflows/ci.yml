@@ -1,0 +1,37 @@
+# CI：开源的唯一门禁——产物与源码一致 + 全部用例通过
+#
+# 本项目零 npm 依赖，因此不需要 install 步骤；`npm run check` 内部先跑
+# `node build/bundle.mjs --check`（校验提交进仓库的 lib/client.js 与 src/ 等价），
+# 再跑 `node --test` 的全部用例。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: check (node ${{ matrix.node }} / ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # 插件声明 engines.node >= 20；Windows 是主要目标平台，Linux 用于守住
+        # 「纯逻辑层不依赖平台」这条约束。
+        os: [windows-latest, ubuntu-latest]
+        node: [20, 24]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: 校验 bundle 与源码一致并跑全部用例
+        run: npm run check
