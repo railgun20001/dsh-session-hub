@@ -49,13 +49,13 @@ const CROSS_TAB_WINDOW_MS = 4000
 const NOTIFY_LOG_LIMIT = 20
 
 /**
- * 等待 `onshow` / `onerror` 的上限（毫秒）。
+ * 等待通知回执事件的上限（毫秒）。
  *
- * 超过这个时间两个事件都没来，记成 `no-event`。**它只表示「没等到回执」，不表示
- * 「没显示」**：本机 Electron 44 + Windows 11 上实测存在「横幅和通知中心都出现了、
- * 但 `onshow` 始终不派发」的通知（同一段代码同一时刻另一些通知又能拿到 `shown`），
- * 所以 `no-event` 只能当「未知」看，绝不能用它去判定失败或触发重发——那会在已经
- * 显示过的通知上再补一条重复的。
+ * 超过这个时间 `show` / `failed` 都没来，记成 `no-event`。**它只表示「没等到回执」，
+ * 不表示「没显示」**：也可能显示了但回执没派发。因此 `no-event` 只能当「未知」看，
+ * 绝不能用它去判定失败或触发重发——那会在已经显示过的通知上再补一条重复的。
+ * 真正要确认「到没到系统」，查 Windows 的
+ * `Microsoft-Windows-PushNotification-Platform/Operational` 有没有 2416。
  */
 const NOTIFY_SHOW_TIMEOUT_MS = 2500
 
@@ -174,7 +174,7 @@ function claimEvent(dedupeKey) {
  *
  * 为什么要落盘而不是只 `console.warn`：桌面端的渲染进程控制台平时没人看，
  * 而「通知没弹」恰恰是**现场已经过去**才被发现的故障；把最近若干条的
- * 权限状态 / 构造结果 / `onshow` / `onerror` 留在 `notify-log-v1` 里，
+ * 权限状态 / 构造结果 / `show` / `failed` 留在 `notify-log-v1` 里，
  * 事后读 localStorage 就能判断是插件没发、浏览器没交给系统，还是系统没显示。
  * 记录本身失败绝不影响通知流程。
  * @param {object} entry 一条诊断（stage 为阶段，其余字段随阶段变化）。
@@ -531,15 +531,67 @@ function apply(ctx) {
   let warmedUp = false
 
   /**
+   * 把一条通知的身份压成可以安全交给 Windows 的短 `tag`。
+   *
+   * ## 为什么必须压短（2026-10-26 实测）
+   *
+   * Windows 的 toast 对 `tag` 长度有硬限制，超了之后**整条通知在 Chromium 里被悄悄
+   * 丢掉**：`new Notification()` 构造成功、`show` 和 `failed` 都不派发、Windows 的
+   * `PushNotification-Platform` 连 `2416`（本地通知提交）都没有——表现跟「插件压根没发」
+   * 一模一样，所以这个坑一直查不出来。同机（Windows 11 + Electron 44.7.0）对照实验：
+   *
+   * | tag | 结果 |
+   * |---|---|
+   * | 不带 tag | `show`，Windows 有 2416 |
+   * | `ab-x`（4 字符） | `show`，Windows 有 2416 |
+   * | `abcdefghij123456`（16 字符） | `show`，Windows 有 2416 |
+   * | `dsh-session-hub:session-82ed72ce-…#completed:1345`（63 字符） | 无 `show`、无 `failed`、Windows 无 2416 |
+   *
+   * 结论：**16 字符以内安全，几十个字符必丢**。因此不再把可读的
+   * `<插件>:<会话>#<事件>` 直接当 tag，而是取它的哈希，压成「`dsh` + 12 位十六进制」
+   * ＝ 15 个字符，严格低于那 16 字符的实验安全上限。
+   *
+   * ## 为什么是 48 位而不是 32 位
+   *
+   * tag 的唯一性只用来避开平台侧「同 tag 替换」分支；但 32 位哈希在几百条通知的量级上
+   * 已经有可观的碰撞概率，而碰撞的后果是「新通知顶掉旧通知」。两趟不同偏移基的 FNV-1a
+   * 拼成 48 位，碰撞概率降到可以忽略，长度也只多 4 个字符。
+   *
+   * 去重本身**不**依赖 tag：同一事件只弹一次由 `claimEvent` + 水位负责，tag 只影响
+   * 平台侧的替换/合并语义。所以哈希不可读不影响正确性；可读的身份原样记进诊断日志
+   * （见 {@link recordNotify} 的 `key` 字段）。
+   *
+   * @param {string} identity 完整身份串（`<插件>:<会话>#<事件键>`）。
+   * @returns {string} 15 个字符的 tag，只含 `[a-z0-9]`。
+   */
+  const shortToastTag = (identity) => {
+    /** FNV-1a 32 位；换一个偏移基就是另一趟独立散列。 */
+    const fnv1a = (seed) => {
+      let hash = seed >>> 0
+      for (let index = 0; index < identity.length; index += 1) {
+        hash ^= identity.charCodeAt(index)
+        hash = Math.imul(hash, 0x01000193) >>> 0
+      }
+      return hash
+    }
+    const high = fnv1a(0x811c9dc5)
+    const low = fnv1a(0x9e3779b9)
+    return `dsh${high.toString(16).padStart(8, '0')}${(low & 0xffff).toString(16).padStart(4, '0')}`
+  }
+
+  /**
    * 弹一条系统通知。
    * @param {object} notification 引擎产出的通知描述。
    */
   const showNotification = (notification) => {
+    /** 可读的事件身份：`<插件>:<会话>#<事件键>`。只进诊断日志，不直接当 tag（见 {@link shortToastTag}）。 */
+    const tagKey = `${PLUGIN_ID}:${notification.sessionId}#${notification.dedupeKey}`
     /** 诊断日志的公共字段。 */
     const base = {
       sessionId: notification.sessionId,
       category: notification.category,
       title: notification.title,
+      key: tagKey,
       permission: typeof Notification === 'undefined' ? 'unsupported' : String(Notification.permission),
     }
     if (typeof Notification === 'undefined') {
@@ -563,17 +615,12 @@ function apply(ctx) {
       callHostRoute('warmup')
     }
 
-    // 每条事件一个**唯一** tag：`<插件>:<会话>#<事件>`，绝不走「同 tag 替换」那条路径。
+    // 每条事件一个**唯一**、且足够短的 tag，避开平台侧「同 tag 替换」分支。
     //
-    // 2026-10-23 现场教训（Windows 11 + Electron 44）：带同一个 tag 的通知会走平台的
-    // 「替换 / renotify」分支，而这条分支实测会把通知整条丢掉——连 Windows 的
-    // PushNotification-Platform 都收不到提交（15:38–15:47 的 5 条正常投递之后，
-    // 15:54 起全部凭空消失），表现是「插件发了、日志有记录、屏幕和通知中心都没有」，
-    // 而且既没有 `onshow` 也没有 `onerror` 可抓。
-    // 把 `dedupeKey`（同一会话 + 同一事件，见 notify-core 的边沿推导）拼进 tag 之后，
-    // 每条都是全新通知，横幅与通知中心都能落下；代价是同一会话连续几条会各自成条，
-    // 不再自动合并——宁可多一条，也不能一条都没有。
-    const tag = `${PLUGIN_ID}:${notification.sessionId}#${notification.dedupeKey}`
+    // 可读身份在 `tagKey` 里（诊断日志要用），但**不能直接当 tag 用**：2026-10-26 实测
+    // 63 个字符的 tag 会让整条通知在 Chromium 内部被静默丢弃，Windows 侧连提交记录
+    // 都没有（详见 {@link shortToastTag} 的对照表）。这里把它压成 15 个字符的哈希。
+    const tag = shortToastTag(tagKey)
     let toast
     try {
       toast = new Notification(notification.title, {
@@ -592,23 +639,48 @@ function apply(ctx) {
       return
     }
 
-    // 结果诊断：`shown` 表示浏览器确认已显示；`error` 表示浏览器明确拒绝；`no-event`
-    // 表示 2.5 秒内两个事件都没来——**只是「未确认」**，可能显示了也可能没显示
-    // （本机实测两种都出现过），所以它既不能当成功也不能当失败。
-    // 真要判断「到没到系统」，得看 Windows 的
-    // `Microsoft-Windows-PushNotification-Platform/Operational` 日志有没有 2416/3052。
+    // 结果诊断：`shown` 表示浏览器确认已显示；`failed` 表示浏览器/系统明确拒绝；
+    // `no-event` 表示 2.5 秒内什么事件都没来——**只是「未确认」**。要确认「到底到没到
+    // 系统」，最终还得看 Windows 的
+    // `Microsoft-Windows-PushNotification-Platform/Operational` 有没有 2416/3052。
+    //
+    // 事件名必须两套都挂：Electron 的通知对象派发 `show` / `failed`，HTML5
+    // `Notification` 派发的是 `show` / `error`。2026-10-26 之前这里只挂了 `onerror`
+    // （HTML5 的名字），在 Electron 里**永远不会触发**，于是任何真实失败都被记成
+    // `no-event`——诊断在这里断掉，正是「收不到通知」查不出来的直接原因。
     let settled = false
     const settle = (stage, detail) => {
       if (settled) return
       settled = true
       recordNotify({ ...base, tag, stage, detail })
     }
-    try {
-      toast.onshow = () => settle('shown')
-      toast.onerror = (event) => {
-        settle('error', event?.error?.message ?? event?.message ?? 'unknown')
-        console.warn(`[${PLUGIN_ID}] 通知显示失败：${notification.title}`)
+    const onShown = () => settle('shown')
+    const onFailed = (event) => {
+      settle('failed', event?.error?.message ?? event?.message ?? 'unknown')
+      console.warn(`[${PLUGIN_ID}] 通知显示失败：${notification.title}`)
+    }
+    /**
+     * 订阅一个事件。
+     *
+     * 同时兼容 EventTarget 与只暴露属性回调的实现；不支持订阅时静默跳过，
+     * 仍然有下面的 2.5 秒兜底，所以绝不让订阅本身把通知拖垮。
+     * @param {string} type 事件名。
+     * @param {(event?: object) => void} handler 处理函数。
+     */
+    const subscribe = (type, handler) => {
+      try {
+        if (typeof toast.addEventListener === 'function') toast.addEventListener(type, handler)
+      } catch {
+        /* 订阅失败不影响兜底超时 */
       }
+    }
+    try {
+      // 属性回调与事件订阅同时挂：`settle` 只认第一次，重复派发没有副作用。
+      toast.onshow = onShown
+      toast.onerror = onFailed
+      subscribe('show', onShown)
+      subscribe('failed', onFailed)
+      subscribe('error', onFailed)
       if (typeof setTimeout === 'function') {
         setTimeout(() => settle('no-event'), NOTIFY_SHOW_TIMEOUT_MS)
       }
@@ -616,7 +688,11 @@ function apply(ctx) {
       recordNotify({ ...base, tag, stage: 'hook-failed', detail: String(error) })
     }
 
-    toast.onclick = () => {
+    /** 点击处理只认第一次：属性回调与事件订阅可能同时命中。 */
+    let clicked = false
+    const onClick = () => {
+      if (clicked) return
+      clicked = true
       try {
         toast.close()
       } catch {
@@ -625,6 +701,8 @@ function apply(ctx) {
       // 窗口已经在前台时不需要再前置（也就不会触碰窗口状态）；后台/最小化时才请求。
       openSession(notification.sessionId, { raise: !isFocused(config) })
     }
+    toast.onclick = onClick
+    subscribe('click', onClick)
     toast.onclose = () => {}
   }
 
@@ -1070,10 +1148,14 @@ function apply(ctx) {
     /**
      * 最近若干条通知的落地结果（排障用）。
      *
-     * `stage` 取值：`shown`（浏览器确认已显示）/ `no-event`（2.5 秒内既没 onshow 也没
-     * onerror，**只是未确认，可能已显示**）/ `error`（浏览器拒绝）/ `permission`（权限不是
-     * granted，根本没发）/ `deduped`（别的标签页已弹）/ `construct-failed`（构造函数抛错）/
-     * `unsupported`（环境没有 Notification）。
+     * `stage` 取值：`shown`（浏览器确认已显示）/ `failed`（浏览器或系统明确拒绝，
+     * Electron 派发 `failed`、HTML5 叫 `error`，两个事件名都挂）/ `no-event`（2.5 秒内
+     * 什么回执都没来，**只是未确认，可能已显示**）/ `permission`（权限不是 granted，
+     * 根本没发）/ `deduped`（别的标签页已弹）/ `construct-failed`（构造函数抛错）/
+     * `hook-failed`（挂回调时抛错）/ `unsupported`（环境没有 Notification）。
+     *
+     * 每条带 `key`（可读身份 `<插件>:<会话>#<事件键>`）与 `tag`（真正交给系统的短哈希）——
+     * **tag 超长会导致通知被 Chromium 静默丢弃**，所以两者分开记。
      * @returns {Array<object>} 诊断日志（时间正序，最多 {@link NOTIFY_LOG_LIMIT} 条）。
      */
     getNotifyLog: () => {

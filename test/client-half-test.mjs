@@ -32,6 +32,8 @@ async function createHarness(boot = {}) {
     storage: new Map(),
     listeners: new Map(),
     registration: null,
+    /** 非空时让下一条通知模拟「系统侧拒绝」，派发 `failed` 事件。 */
+    failWith: null,
     /** 侧栏行桩：每项形如 `{ dataset: { rowKey }, calls, scrollIntoView }`。 */
     rows: [],
   }
@@ -45,16 +47,43 @@ async function createHarness(boot = {}) {
       this.title = title
       this.options = options ?? {}
       this.closed = false
+      this.listeners = new Map()
       state.notifications.push(this)
-      // 真实 Chromium 是异步回调 onshow：构造返回后才派发，这里用微任务对齐，
-      // 保证「构造后立刻挂 onshow」的写法在测试里也能收到回调。
+      // 真实 Chromium 是异步派发事件：构造返回后才回调，这里用微任务对齐，
+      // 保证「构造后立刻挂回调」的写法在测试里也能收到。
+      // `state.failWith` 非空时模拟系统侧拒绝（派发 `failed` 而不是 `show`）。
       queueMicrotask(() => {
+        if (state.failWith) {
+          this.dispatch('failed', { error: { message: state.failWith } })
+          return
+        }
+        this.dispatch('show')
+      })
+    }
+    /**
+     * 订阅事件：与真实 Electron 通知对象一致（EventTarget 风格）。
+     * @param {string} type 事件名。
+     * @param {(event?: object) => void} handler 处理函数。
+     */
+    addEventListener(type, handler) {
+      const list = this.listeners.get(type) ?? []
+      list.push(handler)
+      this.listeners.set(type, list)
+    }
+    /**
+     * 派发事件：属性回调与订阅回调都要触发，模拟两种实现都会收到同一个事件。
+     * @param {string} type 事件名。
+     * @param {object} [event] 事件对象。
+     */
+    dispatch(type, event) {
+      const handlers = [this[`on${type}`], ...(this.listeners.get(type) ?? [])]
+      for (const handler of handlers) {
         try {
-          this.onshow?.()
+          handler?.(event)
         } catch {
           /* 桩不关心回调里的异常 */
         }
-      })
+      }
     }
     close() {
       this.closed = true
@@ -345,7 +374,10 @@ test('新一轮完成弹「任务完成」，点通知跳回会话并把窗口�
     const toast = harness.state.notifications[0]
     assert.equal(toast.title, 'DSH · 任务完成')
     assert.equal(toast.options.body, '会话 s1')
-    assert.equal(toast.options.tag, 'dsh-session-hub:s1#completed:12')
+    // tag 只放身份哈希：长 tag（几十个字符）会被 Chromium 静默丢弃整条通知，
+    // 所以 tag 必须短且只含字母数字（详见 src/client-main.js 的 shortToastTag）。
+    assert.match(toast.options.tag, /^dsh[0-9a-f]{12}$/)
+    assert.ok(toast.options.tag.length <= 16, 'tag 不能超过实测安全长度 16 字符')
     assert.equal(toast.options.requireInteraction, false)
     assert.equal(toast.options.silent, false)
     // 每条事件一个唯一 tag，且刻意不传 renotify：本机实测「同 tag 替换」那条平台
@@ -388,11 +420,11 @@ test('同一会话的两次事件用两个不同的 tag，不依赖平台替换'
 
     assert.equal(harness.state.notifications.length, 2)
     const [first, second] = harness.state.notifications
-    assert.equal(first.options.tag, 'dsh-session-hub:s1#completed:12')
-    assert.equal(second.options.tag, 'dsh-session-hub:s1#completed:13')
+    assert.match(first.options.tag, /^dsh[0-9a-f]{12}$/)
+    assert.match(second.options.tag, /^dsh[0-9a-f]{12}$/)
     assert.notEqual(first.options.tag, second.options.tag, '同会话的不同事件不能共用 tag')
-    // tag 都以「插件:会话」开头，平台侧仍能看出它们属于同一个会话。
-    assert.match(second.options.tag, /^dsh-session-hub:s1#/)
+    // tag 长得一样但都短：这是「越过平台替换分支」与「不被 Chromium 丢弃」的共同前提。
+    assert.ok(second.options.tag.length <= 16, 'tag 不能超过实测安全长度 16 字符')
   } finally {
     harness.dispose()
     harness.restore()
@@ -413,13 +445,60 @@ test('通知落地结果写进诊断日志：onshow 记 shown', async () => {
     assert.equal(log.length, 1, '一次通知只应记一条结果')
     assert.equal(log[0].stage, 'shown')
     assert.equal(log[0].sessionId, 's1')
-    assert.equal(log[0].tag, 'dsh-session-hub:s1#completed:12')
+    assert.match(log[0].tag, /^dsh[0-9a-f]{12}$/)
+    // 可读身份不丢，只是挪到 `key` 里：排障时仍能看出是哪条事件。
+    assert.equal(log[0].key, 'dsh-session-hub:s1#completed:12')
     assert.equal(log[0].permission, 'granted')
 
     // 清空后重新读回空表（排障入口要能复位）。
     assert.deepEqual(globalThis.__DSH_SESSION_HUB__.clearNotifyLog(), [])
     assert.deepEqual(globalThis.__DSH_SESSION_HUB__.getNotifyLog(), [])
   } finally {
+    harness.dispose()
+    harness.restore()
+  }
+})
+
+test('tag 长度与身份长短无关：超长会话 id 也只产出 15 个字符', async () => {
+  const harness = await createHarness({
+    sessions: [sessionRow('s1')],
+    projections: { s1: turnEnd(10, 'completed') },
+  })
+  try {
+    await settle()
+    // 会话 id 长到 60+ 字符，拼出来的可读身份远超实测的 16 字符安全上限；
+    // tag 必须是它的哈希，长度恒定，否则通知会被 Chromium 静默丢弃。
+    const longId = `session-${'a'.repeat(60)}`
+    assert.equal(globalThis.__DSH_SESSION_HUB__.testNotification(longId), true)
+    await settle()
+    const toast = harness.state.notifications.at(-1)
+    assert.equal(toast.options.tag.length, 15, 'tag 必须恒为 15 个字符')
+    assert.match(toast.options.tag, /^dsh[0-9a-f]{12}$/)
+  } finally {
+    harness.dispose()
+    harness.restore()
+  }
+})
+
+test('系统侧拒绝时记 failed，不再一律吞成 no-event', async () => {
+  const harness = await createHarness({
+    sessions: [sessionRow('s1')],
+    projections: { s1: turnEnd(10, 'completed') },
+  })
+  try {
+    await settle()
+    harness.state.failWith = 'element not found'
+    harness.setProjection('s1', turnEnd(12, 'completed'))
+    await settle()
+
+    const log = globalThis.__DSH_SESSION_HUB__.getNotifyLog()
+    assert.equal(log.length, 1)
+    // Electron 派发的是 `failed`（HTML5 的 `error` 在 Electron 里永远不会来），
+    // 两个名字都要挂上，否则失败会被记成 no-event、诊断彻底断掉。
+    assert.equal(log[0].stage, 'failed')
+    assert.match(String(log[0].detail), /element not found/)
+  } finally {
+    harness.state.failWith = null
     harness.dispose()
     harness.restore()
   }

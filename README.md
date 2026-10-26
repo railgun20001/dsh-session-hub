@@ -159,22 +159,46 @@
 会话」的时候（`silenceCurrentWhenFocused`）。所以切去别的应用干活、任务在后台跑完 →
 通知 + 任务栏绿灯 + 状态栏「待查看」三件一起到（见 1.2 节）。
 
-点击通知：`openSession` 跳转 + 宿主半前置窗口。每条通知的 `tag` 是
-`dsh-session-hub:<会话 id>#<事件键>`——**一次事件一个唯一 tag，永不与别的通知共用**。
+点击通知：`openSession` 跳转 + 宿主半前置窗口。每条通知一个**唯一且足够短**的 `tag`
+（`dsh` + 12 位十六进制哈希 = 15 个字符，取自 `<插件>:<会话 id>#<事件键>`）。
 多标签页共享 `localStorage` 时同一事件只弹一条。
 
-为什么不复用同一个 tag 做「同会话替换旧通知」：2026-10-23 白天现场（Windows 11 +
-Electron 44）证实，走进平台「替换 / renotify」分支的通知会被**整条丢弃**——Windows 的
-`PushNotification-Platform` 连提交记录都没有（15:38–15:47 的 5 条正常投递之后，15:54 起
-全部消失），而渲染进程既拿不到 `onshow` 也拿不到 `onerror`。代价是同会话连续几条会各自
-成条（不再自动合并），换来的是**每一条都一定落在通知中心里**。
+### 为什么 tag 必须是短哈希（2026-10-26 定位）
 
-通知到底有没有落到系统上，看客户端半的落地日志（`localStorage` 的 `dsh-session-hub/notify-log-v1`，
-保留最近 20 条）：`shown` 是浏览器确认已显示，`error` / `permission` 是浏览器侧拒绝，
-`no-event` 只表示 2.5 秒内**没等到回执**——本机实测存在「横幅和通知中心都出现了、但
-`onshow` 不派发」的通知，所以它属于「未知」，既不能当成功也不能当失败，更不能用它触发
-重发（那会补一条重复通知）。要确认系统侧，查
-`Microsoft-Windows-PushNotification-Platform/Operational` 里的 2416 / 3052 事件。
+Windows 的 toast 对 `tag` 长度有硬限制，**超了会让整条通知在 Chromium 内部被静默丢弃**：
+`new Notification()` 构造成功、`show` 和 `failed` 都不派发、Windows 的
+`PushNotification-Platform` 连 `2416`（本地通知提交）都没有——表现和「插件压根没发」
+完全一样。同机对照实验（Windows 11 + Electron 44.7.0，都在渲染进程里 `new Notification`）：
+
+| tag | 结果 |
+|---|---|
+| 不带 tag | `show`，Windows 有 2416 |
+| `ab-x`（4 字符） | `show`，Windows 有 2416 |
+| `abcdefghij123456`（16 字符） | `show`，Windows 有 2416 |
+| `dsh-session-hub:session-82ed72ce-…#completed:1345`（63 字符） | 无 `show`、无 `failed`、Windows 无 2416 |
+
+所以 tag 只放哈希（15 字符，低于实验安全上限 16），可读身份记在诊断日志的 `key` 字段里。
+去重不依赖 tag：同一事件只弹一次由 `claimEvent` + 水位负责。
+
+> 2026-10-23 曾把同一现象归因为「平台的替换 / renotify 分支」，并据此加了「唯一 tag」；
+> 实际根因是 **tag 太长**，唯一的可读 tag 依然几十个字符，所以那段时间通知照丢。
+
+### 诊断日志
+
+通知到底有没有落到系统上，看客户端半的落地日志（`localStorage` 的
+`dsh-session-hub/notify-log-v1`，保留最近 20 条）：
+
+| `stage` | 含义 |
+|---|---|
+| `shown` | 浏览器确认已显示 |
+| `failed` | 浏览器/系统明确拒绝（Electron 派发 `failed`；HTML5 叫 `error`，两个事件名都挂） |
+| `permission` / `unsupported` | 权限没给 / 环境没有 `Notification` |
+| `deduped` | 同一事件已被别的标签页弹过 |
+| `construct-failed` / `hook-failed` | 构造或挂回调时抛异常（带 `detail`） |
+| `no-event` | 2.5 秒内什么事件都没来，**只是「未确认」**，不能当成功也不能当失败，更不能用它触发重发 |
+
+要确认系统侧，查 `Microsoft-Windows-PushNotification-Platform/Operational` 里的
+2416 / 3052 / 3153 事件——**没有 2416 就说明通知根本没离开 Electron**。
 
 ---
 
@@ -321,7 +345,7 @@ __DSH_SESSION_HUB__.clearLocalUnread() // 手动清掉全部补记（绿灯随�
 __DSH_SESSION_HUB__.setTaskbarState('red')    // 手动试任务栏红点（排障）
 __DSH_SESSION_HUB__.setTaskbarState('none')   // 清掉
 __DSH_SESSION_HUB__.testNotification() // 弹一条测试通知，点它应跳回当前会话
-__DSH_SESSION_HUB__.getNotifyLog()      // 最近 20 条通知的落地结果（shown / no-event / error / permission / deduped）
+__DSH_SESSION_HUB__.getNotifyLog()      // 最近 20 条通知的落地结果（shown / failed / no-event / permission / deduped）
 __DSH_SESSION_HUB__.clearNotifyLog()    // 清空落地日志
 __DSH_SESSION_HUB__.revealSessionRow('session-…') // 'session' / 'workspace' / null：验证左侧列表能滚到该会话行（不跳转）
 __DSH_SESSION_HUB__.pingHost()         // 'present' / 'absent' / 'unknown'
