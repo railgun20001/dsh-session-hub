@@ -1,5 +1,5 @@
 /**
- * dsh-session-hub —— 客户端半的插槽注册（状态栏 / 顶栏变体 / 行悬停提示）
+ * dsh-session-status-hub —— 客户端半的插槽注册（状态栏 / 顶栏变体 / 行悬停提示）
  *
  * 三处注册，位置与取舍见 README 第 2 节：
  *
@@ -15,7 +15,7 @@
  * 注册全部是「尽力而为」：拿不到 React、拿不到 slots 或 locale 服务、注册抛错，都只记日志。
  * 通知与任务栏走的是另一条通路，不依赖渲染。
  *
- * @module dsh-session-hub/hub-slots
+ * @module dsh-session-status-hub/hub-slots
  */
 
 /**

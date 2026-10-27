@@ -1,5 +1,5 @@
 /**
- * dsh-session-hub —— 客户端半的四份持久状态（配置 / 水位 / 报错确认 / 后台完成记账）
+ * dsh-session-status-hub —— 客户端半的四份持久状态（配置 / 水位 / 报错确认 / 后台完成记账）
  *
  * 这一层把「插件在浏览器里记着什么」收拢到一处，其余模块只通过它读写：
  *
@@ -22,7 +22,7 @@
  *     模型层（`normalizeConfig` / `normalizeSeqMap`），这里用参数接进来，避免这一层
  *     反过来依赖模型层的实现细节。
  *
- * @module dsh-session-hub/hub-stores
+ * @module dsh-session-status-hub/hub-stores
  */
 
 /**
@@ -49,7 +49,7 @@ export function createSnapshotStore(initial) {
         try {
           listener()
         } catch (error) {
-          console.warn('[dsh-session-hub] 状态栏订阅者抛错', error)
+          console.warn('[dsh-session-status-hub] 状态栏订阅者抛错', error)
         }
       }
     },

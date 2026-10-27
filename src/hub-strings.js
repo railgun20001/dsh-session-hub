@@ -1,5 +1,5 @@
 /**
- * dsh-session-hub —— 界面文案的**单一来源**
+ * dsh-session-status-hub —— 界面文案的**单一来源**
  *
  * 状态栏、会话行悬停提示、以及注册到宿主 locale 服务的字典，都必须从这里取。
  * 之前同一个字符串存在三处（locale 注册一份、两个组件的 FALLBACK 各一份），加一条文案
@@ -13,7 +13,7 @@
  *   - `state.<state>`：状态短标签，`<state>` 必须与 hub-model 的 STATE_ORDER 键一致
  *   - `row.<kind>`：会话行悬停卡片里的失败提示，`<kind>` 与 failureKindOf 的返回值一致
  *
- * @module dsh-session-hub/hub-strings
+ * @module dsh-session-status-hub/hub-strings
  */
 
 /**

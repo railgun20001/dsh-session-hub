@@ -1,5 +1,5 @@
 /**
- * dsh-session-hub —— 状态栏与任务栏的纯逻辑模型（零依赖，可在 Node 里单测）
+ * dsh-session-status-hub —— 状态栏与任务栏的纯逻辑模型（零依赖，可在 Node 里单测）
  *
  * 这一层把「会话列表 + 统一会话状态 + 最后回合结局投影」折叠成状态栏要显示的行，
  * 以及任务栏要显示的聚合状态。它不碰 DOM、不碰 React、不碰 Cordis。
@@ -41,7 +41,7 @@
  * **运行中不点灯**：正在跑是常态，不需要你介入；把它点亮只会让任务栏一直是绿的，
  * 反而盖掉真正的提示。运行中仍然出现在状态栏 chip 里（蓝色脉冲点）。
  *
- * @module dsh-session-hub/hub-model
+ * @module dsh-session-status-hub/hub-model
  */
 
 /** 三类「需要你回应」的待交互（与 dsh-client-ui-workspace 的 visiblePendingKind 同口径）。 */

@@ -1,5 +1,5 @@
 /**
- * dsh-session-hub —— 客户端持久状态单测（src/hub-json-store.js / src/hub-stores.js）
+ * dsh-session-status-hub —— 客户端持久状态单测（src/hub-json-store.js / src/hub-stores.js）
  *
  * 这一层管着插件在浏览器里记着什么：配置、通知水位、报错确认、后台完成记账。
  * 以前它们和 tick、通知、插槽注册挤在同一个 `apply` 里，只能通过整体行为测试间接覆盖；
@@ -41,7 +41,7 @@ function harness(options = {}) {
   const warnings = []
   const storage = options.storage ?? memoryStorage(options.initial)
   const store = createJsonStore({
-    pluginId: 'dsh-session-hub',
+    pluginId: 'dsh-session-status-hub',
     storage,
     warn: (message) => { warnings.push(message) },
   })
@@ -64,7 +64,7 @@ test('JSON 存储：坏 JSON 回落默认值并告警，不抛错', () => {
 })
 
 test('JSON 存储：没有存储后端时所有读写静默降级', () => {
-  const store = createJsonStore({ pluginId: 'dsh-session-hub', storage: null, warn: () => { throw new Error('不该告警') } })
+  const store = createJsonStore({ pluginId: 'dsh-session-status-hub', storage: null, warn: () => { throw new Error('不该告警') } })
   assert.deepEqual(store.read('any', { fallback: true }), { fallback: true })
   store.write('any', { ok: true })
 })
@@ -72,7 +72,7 @@ test('JSON 存储：没有存储后端时所有读写静默降级', () => {
 test('JSON 存储：写入失败（配额 / 隐私模式）只告警，不抛出', () => {
   const warnings = []
   const store = createJsonStore({
-    pluginId: 'dsh-session-hub',
+    pluginId: 'dsh-session-status-hub',
     storage: { getItem: () => null, setItem: () => { throw new Error('QuotaExceededError') } },
     warn: (message) => { warnings.push(message) },
   })

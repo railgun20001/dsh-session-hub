@@ -1,5 +1,5 @@
 /**
- * dsh-session-hub —— 客户端半通往宿主半的三条路（窗口前置 / 任务栏状态 / 在线探活）
+ * dsh-session-status-hub —— 客户端半通往宿主半的三条路（窗口前置 / 任务栏状态 / 在线探活）
  *
  * 渲染进程做不到「把窗口提到前台」和「在任务栏图标上画点」，这两件事只能请求宿主半
  * （见 lib/raise-window.js 的说明）。这一层把三条请求收敛到一处，并统一成两种姿态：
@@ -16,7 +16,7 @@
  * 加载，客户端半每次刷新页面都重新取）。因此这里只认 `/ping` 的应答：`host` 字段对得上
  * 就是在；返回路由家族的 404 JSON 说明「路由在、宿主半是旧构建」，同样算在线。
  *
- * @module dsh-session-hub/hub-host
+ * @module dsh-session-status-hub/hub-host
  */
 
 /** 探活失败后的重试间隔：不管上次结论如何，5 分钟内只问一次。 */
@@ -66,7 +66,7 @@ export function createHostBridge({
   /**
    * 发一个「不需要看响应」的 POST（文档相对路径：桌面端由 shell 同源转发，Web 端落在
    * 部署前缀下）。
-   * @param {string} path 相对路径，例如 `dsh-session-hub/raise`。
+   * @param {string} path 相对路径，例如 `dsh-session-status-hub/raise`。
    * @param {RequestInit} [init] 额外请求参数。
    * @returns {void}
    */

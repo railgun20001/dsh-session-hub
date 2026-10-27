@@ -1,5 +1,5 @@
 /**
- * dsh-session-hub —— 通知决策引擎（纯逻辑，零依赖）
+ * dsh-session-status-hub —— 通知决策引擎（纯逻辑，零依赖）
  *
  * 这一层只做一件事：把「会话事实快照」折叠成「本次应当弹出的通知列表」。
  * 它不碰 DOM、不碰 Notification、不碰 Cordis，因此可以在 Node 里直接单测。

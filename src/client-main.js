@@ -1,5 +1,5 @@
 /**
- * dsh-session-hub —— 客户端半的接线层（浏览器 bundle 的 factory 体）
+ * dsh-session-status-hub —— 客户端半的接线层（浏览器 bundle 的 factory 体）
  *
  * 这一层只做「编排」，不实现细节：
  *
@@ -30,7 +30,7 @@
  * 它不 retain 任何会话——因此不会激活别人的历史，也不会在侧栏里留下痕迹。
  * 任何异常都只记日志：状态栏与通知绝不能影响 DSH 本身。
  *
- * @module dsh-session-hub/client
+ * @module dsh-session-status-hub/client
  */
 
 /** 硬依赖：会话列表与统一会话状态。两者都是 web 组合的常驻服务。 */

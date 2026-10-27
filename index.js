@@ -1,5 +1,5 @@
 /**
- * dsh-session-hub —— 宿主半
+ * dsh-session-status-hub —— 宿主半
  *
  * 宿主半做三件事：
  *
@@ -55,7 +55,7 @@
  * （viewCheckpoint / restore / hydrate / viewCell 路径），因此这里提供一个等价的
  * 极简校验对象，校验语义与内置单元的 zod schema 一致：非法持久行抛错。
  *
- * @module dsh-session-hub
+ * @module dsh-session-status-hub
  */
 
 import { createWindowRaiser, resolveTargetProcessId, isOverlayState, WORKER_PROTOCOL } from './lib/raise-window.js'
@@ -113,7 +113,7 @@ const ACCOUNT_SIGNED_OUT = 'ACCOUNT_SIGNED_OUT'
  * 这些字符串与客户端半共用同一份定义（`src/hub-identity.js`），本文件只做 re-export，
  * 不再各自写一份字面量——以前注释写着「两半共用这一个字符串」，实际却是两处字面量。
  *
- * 路由的调用约定：客户端用**文档相对**路径请求（`dsh-session-hub/...`，不带前导斜杠）：
+ * 路由的调用约定：客户端用**文档相对**路径请求（`dsh-session-status-hub/...`，不带前导斜杠）：
  * 桌面端页面是 `dsh-app://app/`，其非静态路径会被 shell 同源转发到宿主；Web 端页面带
  * `<base href="./">`，相对路径能正确落在部署前缀下（与 dsh-client-ui-skill-explorer
  * 的 `api/...` 同款约定）。
@@ -131,7 +131,7 @@ const MAX_BODY_BYTES = 1024
  * 做「提窗口 / 画任务栏点 / 只读诊断」，读不到用户数据，所以危害有限；但「有限」不等于
  * 「可以不管」：
  *
- *   - 任意网页都能向 `http://127.0.0.1:<端口>/dsh-session-hub/raise` 发一个
+ *   - 任意网页都能向 `http://127.0.0.1:<端口>/dsh-session-status-hub/raise` 发一个
  *     `mode: no-cors` 的简单 POST——读不到响应，但**副作用已经发生**（窗口被弹到前台）；
  *     同理可以反复 `/warmup` 让 PowerShell worker 反复启动。
  *   - 若把 DSH 的 Web 端口暴露到局域网/反向代理，同网段任何人都能触发上面这些。

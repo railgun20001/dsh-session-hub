@@ -1,5 +1,5 @@
 /**
- * dsh-session-hub 客户端 bundle 构建脚本。
+ * dsh-session-status-hub 客户端 bundle 构建脚本。
  *
  * 产物 `lib/client.js` 是**手写协议**的浏览器 bundle：DSH 的客户端模块系统
  * （@deepseek-ai/dsh-client-modules）用 classic `<script>` 加载每个插件的客户端半，
@@ -22,7 +22,7 @@
  *   node build/bundle.mjs            # 生成 lib/client.js
  *   node build/bundle.mjs --check    # 只校验产物是当前源码的等价生成（CI 用）
  *
- * @module dsh-session-hub/build
+ * @module dsh-session-status-hub/build
  */
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
@@ -111,7 +111,7 @@ function build() {
     : (() => { throw new Error('package.json 缺少 name') })()
 
   const header = `/**
- * dsh-session-hub —— 客户端 bundle（由 build/bundle.mjs 生成，请不要手改）
+ * dsh-session-status-hub —— 客户端 bundle（由 build/bundle.mjs 生成，请不要手改）
  *
  * 内联自 src/ 下的 ${SOURCES.length} 个文件（顺序即作用域顺序）：
 ${SOURCES.map((entry) => ` *   - src/${entry.file.padEnd(20)}${entry.label}`).join('\n')}

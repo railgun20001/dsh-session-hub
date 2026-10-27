@@ -1,5 +1,5 @@
 /**
- * dsh-session-hub —— 插件身份与存储键的**单一来源**
+ * dsh-session-status-hub —— 插件身份与存储键的**单一来源**
  *
  * 这些字符串以前散在三个地方（宿主半的 `PROJECTION_KEY`、客户端半的 `PLUGIN_ID`、
  * 以及各处 localStorage 键字面量），注释还写着「两半共用同一个字符串」却没有共用的事实。
@@ -11,7 +11,7 @@
  * 因此本文件**不能** import 任何东西：内联要求它是自足的（否则 bundle 里会出现顶层
  * `import`，浏览器 classic script 直接语法错误）。
  *
- * @module dsh-session-hub/hub-identity
+ * @module dsh-session-status-hub/hub-identity
  */
 
 /**
@@ -63,7 +63,7 @@ export const ROUTE_PATH = '/dsh-session-status-hub'
  * POST 到本机端口，也到不了 handler（详见 index.js 里 createRouteHandler 的说明）。
  * @type {string}
  */
-export const ROUTE_HEADER = 'x-dsh-session-hub'
+export const ROUTE_HEADER = 'x-dsh-session-status-hub'
 
 /**
  * 签名头的唯一合法取值。没有语义，只是为了让头「非空且确定」，便于服务端做等值判断。
@@ -95,7 +95,7 @@ export const STORAGE_SUFFIX = Object.freeze({
 /**
  * 拼出当前插件的全部 localStorage 键。
  * @param {string} [pluginId] 插件 id；默认 {@link PLUGIN_ID}。
- * @returns {Record<string, string>} 例如 `{ config: 'dsh-session-hub/config-v1', … }`。
+ * @returns {Record<string, string>} 例如 `{ config: 'dsh-session-status-hub/config-v1', … }`。
  */
 export function hubStorageKeys(pluginId = PLUGIN_ID) {
   const keys = {}

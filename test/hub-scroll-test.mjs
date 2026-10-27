@@ -1,5 +1,5 @@
 /**
- * dsh-session-hub —— 侧栏会话行定位与滚动的纯逻辑测试。
+ * dsh-session-status-hub —— 侧栏会话行定位与滚动的纯逻辑测试。
  *
  * 运行：node --test test/hub-scroll-test.mjs
  *

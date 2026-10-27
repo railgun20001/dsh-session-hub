@@ -1,5 +1,5 @@
 /**
- * dsh-session-hub —— 通知落地层（跨标签页去重 / 短 tag / 落地诊断日志）
+ * dsh-session-status-hub —— 通知落地层（跨标签页去重 / 短 tag / 落地诊断日志）
  *
  * 这一层只负责「把引擎算出来的通知真的交给系统，并留下可查的证据」。它不判断该不该弹
  * （那是 `planNotifications` 的事），也不决定文案（`describeNotification` 的事）。
@@ -15,7 +15,7 @@
  *    发现的故障。把权限、构造结果、`show` / `failed` / `no-event` 留在 localStorage 里，
  *    事后能判断是插件没发、Electron 没交给系统，还是系统没显示。
  *
- * @module dsh-session-hub/hub-notify
+ * @module dsh-session-status-hub/hub-notify
  */
 
 /** 多标签页去重窗口：同一事件在此窗口内只允许一个页面真的弹通知。 */

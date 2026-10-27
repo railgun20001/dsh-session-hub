@@ -1,5 +1,5 @@
 /**
- * dsh-session-hub —— 侧栏会话行定位与滚动（纯浏览器 DOM 辅助，可在 Node 里单测）
+ * dsh-session-status-hub —— 侧栏会话行定位与滚动（纯浏览器 DOM 辅助，可在 Node 里单测）
  *
  * 目标：点击状态栏 chip / 通知跳转到某个会话后，让**左侧会话列表也滚动到该会话行**
  * （尽量垂直居中），长列表里目标行不在视野内时尤其重要。
@@ -25,7 +25,7 @@
  * 这里按「先按属性前缀粗筛，再用 dataset 精确比较」查找，**不把会话 id 拼进 CSS
  * 选择器**——id 里可能带引号/反斜杠，拼进选择器会抛异常或误匹配。
  *
- * @module dsh-session-hub/hub-scroll
+ * @module dsh-session-status-hub/hub-scroll
  */
 
 /** 会话行 `data-row-key` 的前缀。 */

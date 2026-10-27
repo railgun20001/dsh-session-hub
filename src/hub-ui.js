@@ -1,5 +1,5 @@
 /**
- * dsh-session-hub —— 工作区顶部会话状态栏（React 组件工厂，纯浏览器代码）
+ * dsh-session-status-hub —— 工作区顶部会话状态栏（React 组件工厂，纯浏览器代码）
  *
  * 这个文件是 bundle 里的裸脚本片段：`createSessionHubRail(React, deps)` 返回一个
  * 函数组件，由 client-main 注册进 `conversation.header.leading` 官方插槽。
@@ -19,7 +19,7 @@
  * 可见文案一律来自 {@link HUB_STRINGS}（hub-strings.js）——组件里不再存第二份副本，
  * locale 服务不可用时直接用其中的 `zh` 回落。
  *
- * @module dsh-session-hub/hub-ui
+ * @module dsh-session-status-hub/hub-ui
  */
 
 /**
@@ -139,7 +139,7 @@ function createSessionHubRail(React, deps, variant = 'header') {
             try {
               deps.ackError(row.id, row.errorSeq)
             } catch (error) {
-              console.warn('[dsh-session-hub] 确认报错失败', error)
+              console.warn('[dsh-session-status-hub] 确认报错失败', error)
             }
             // 点击 chip 时窗口本来就在前台：只做应用内跳转，不请求窗口前置，
             // 避免触发 Win32 的窗口状态处理（最大化被 SW_RESTORE 打回普通尺寸）。
@@ -171,7 +171,7 @@ function createSessionHubRail(React, deps, variant = 'header') {
 
     return h('div', {
       className: `dsh-hub dsh-hub--${variant}`,
-      'data-dsh-session-hub': variant,
+      'data-dsh-session-status-hub': variant,
       role: 'group',
       'aria-label': rows.length === 0 ? t('idle') : t('aria', { count: rows.length }),
     }, children)
@@ -248,7 +248,7 @@ function createSessionHubRowHint(React, deps) {
 
     return h('div', {
       className: 'dsh-hub-hint',
-      'data-dsh-session-hub-hint': kind,
+      'data-dsh-session-status-hub-hint': kind,
       title: t('row.hint'),
       role: 'status',
     }, [

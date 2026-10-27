@@ -1,5 +1,5 @@
 /**
- * dsh-session-hub —— localStorage 的 JSON 读写层（零依赖，可单测）
+ * dsh-session-status-hub —— localStorage 的 JSON 读写层（零依赖，可单测）
  *
  * 只做一件事：把「读一个 JSON 键」和「写一个 JSON 键」的**全部失败路径**关在这里。
  *
@@ -9,7 +9,7 @@
  *
  * 依赖通过参数注入（`storage` / `warn`），因此可以在 Node 里用假存储直接测，不碰真全局。
  *
- * @module dsh-session-hub/hub-json-store
+ * @module dsh-session-status-hub/hub-json-store
  */
 
 /**
@@ -28,7 +28,7 @@
  */
 export function createJsonStore(options = {}) {
   const {
-    pluginId = 'dsh-session-hub',
+    pluginId = 'dsh-session-status-hub',
     storage = typeof localStorage === 'undefined' ? null : localStorage,
     warn = (message, error) => console.warn(message, error),
   } = options
