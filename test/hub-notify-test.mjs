@@ -1,5 +1,5 @@
 /**
- * dsh-session-hub —— 通知落地层单测（src/hub-notify.js）
+ * dsh-session-status-hub —— 通知落地层单测（src/hub-notify.js）
  *
  * 这一层以前只能通过「加载整个 bundle + 桩浏览器环境」间接测（见 client-half-test.mjs）。
  * 拆出来之后可以直接注入假存储、假时钟与假 Notification，把最容易出错的三件事单独立住：
@@ -62,7 +62,7 @@ function harness(overrides = {}) {
   const state = { created: [], opened: [], warmed: 0, now: 1_000 }
   let config = { colorMarkers: true, sound: true }
   const sink = createNotifySink({
-    pluginId: 'dsh-session-hub',
+    pluginId: 'dsh-session-status-hub',
     keys: { recent: 'recent', notifyLog: 'log' },
     store,
     getConfig: () => config,
@@ -93,12 +93,12 @@ function notification(overrides = {}) {
 }
 
 test('shortToastTag：15 个字符、只含小写字母数字、同身份稳定、异身份不同', () => {
-  const tag = shortToastTag('dsh-session-hub:session-82ed72ce-1#completed:1345')
+  const tag = shortToastTag('dsh-session-status-hub:session-82ed72ce-1#completed:1345')
   assert.match(tag, /^dsh[0-9a-f]{12}$/)
   assert.equal(tag.length, 15)
   assert.ok(tag.length <= 16, '必须低于实测安全上限 16 字符')
-  assert.equal(shortToastTag('dsh-session-hub:session-82ed72ce-1#completed:1345'), tag)
-  assert.notEqual(shortToastTag('dsh-session-hub:session-82ed72ce-1#completed:1346'), tag)
+  assert.equal(shortToastTag('dsh-session-status-hub:session-82ed72ce-1#completed:1345'), tag)
+  assert.notEqual(shortToastTag('dsh-session-status-hub:session-82ed72ce-1#completed:1346'), tag)
 })
 
 test('标题带彩色圆点；colorMarkers 关掉后只剩文案', () => {
@@ -123,7 +123,7 @@ test('tag 交给系统的是短哈希，可读身份只进诊断日志', () => {
   // 构造成功本身不写日志（没有任何回执可报）；拿到 show 回执后才有记录。
   toast.onshow()
   const [entry] = h.sink.getLog()
-  assert.equal(entry.key, 'dsh-session-hub:session-1#completed:12')
+  assert.equal(entry.key, 'dsh-session-status-hub:session-1#completed:12')
   assert.equal(entry.tag, toast.options.tag)
 })
 

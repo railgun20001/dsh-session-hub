@@ -1,4 +1,4 @@
-# dsh-session-hub —— bundle patch
+# dsh-session-status-hub —— bundle patch
 #
 # 一行同时挂起两半：
 #   - 宿主半（index.js）：注册 hubTurnOutcome 会话投影 + 窗口前置 / 任务栏状态点路由；
@@ -6,6 +6,9 @@
 #
 # 客户端半的模块图顺序由 package.json 的 dsh.client.inject 声明（那里写包名），
 # 这里不需要重复。
+#
+# `name` 是包名（= npm 名 = 仓库名）；`id` 只是 profile 树里这一行的节点标识，
+# 沿用短名 `session-hub`，不参与任何对外命名。
 - insert:
     - id: session-hub
       name: dsh-session-status-hub

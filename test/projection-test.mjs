@@ -216,7 +216,7 @@ test('路由只认 POST，ping / debug / raise / warmup / taskbar / 未知动作
   }
   const handler = createRouteHandler(raiser, () => ({ hostHalf: true, marked: 'diagnostics' }))
 
-  const ping = callRoute(handler, 'POST', '/dsh-session-hub/ping')
+  const ping = callRoute(handler, 'POST', `${ROUTE_PATH}/ping`)
   assert.equal(ping.status, 200)
   assert.equal(ping.body.host, PLUGIN_ID)
   assert.equal(ping.body.projectionKey, 'hubTurnOutcome')
@@ -225,43 +225,43 @@ test('路由只认 POST，ping / debug / raise / warmup / taskbar / 未知动作
   // 版本必须与 package.json 一致（宿主半运行时读的就是它），否则两半版本标识会失真。
   assert.equal(ping.body.version, packageVersion())
 
-  const debug = callRoute(handler, 'POST', '/dsh-session-hub/debug')
+  const debug = callRoute(handler, 'POST', `${ROUTE_PATH}/debug`)
   assert.equal(debug.status, 200)
   assert.deepEqual(debug.body, { hostHalf: true, marked: 'diagnostics' })
 
-  const raise = callRoute(handler, 'POST', '/dsh-session-hub/raise')
+  const raise = callRoute(handler, 'POST', `${ROUTE_PATH}/raise`)
   assert.equal(raise.status, 200)
   assert.equal(raise.body.raised, true)
   assert.equal(calls[0], `raise:${resolveTargetProcessId()}`)
 
-  const warm = callRoute(handler, 'POST', '/dsh-session-hub/warmup')
+  const warm = callRoute(handler, 'POST', `${ROUTE_PATH}/warmup`)
   assert.equal(warm.status, 200)
   assert.deepEqual(warm.body, { warm: true })
 
-  const taskbar = callRoute(handler, 'POST', '/dsh-session-hub/taskbar', { state: 'red' })
+  const taskbar = callRoute(handler, 'POST', `${ROUTE_PATH}/taskbar`, { state: 'red' })
   assert.equal(taskbar.status, 200)
   assert.deepEqual(taskbar.body, { ok: true, state: 'red' })
   assert.equal(calls[calls.length - 1], `overlay:red:${resolveTargetProcessId()}`)
 
-  const invalid = callRoute(handler, 'POST', '/dsh-session-hub/taskbar', { state: 'purple' })
+  const invalid = callRoute(handler, 'POST', `${ROUTE_PATH}/taskbar`, { state: 'purple' })
   assert.equal(invalid.status, 400)
   assert.equal(invalid.body.reason, 'invalid-state')
 
-  const bad = callRoute(handler, 'POST', '/dsh-session-hub/nope')
+  const bad = callRoute(handler, 'POST', `${ROUTE_PATH}/nope`)
   assert.equal(bad.status, 404)
   assert.equal(bad.body.error, 'unknown-action')
 
-  const method = callRoute(handler, 'GET', '/dsh-session-hub/raise')
+  const method = callRoute(handler, 'GET', `${ROUTE_PATH}/raise`)
   assert.equal(method.status, 405)
   assert.equal(method.body.error, 'method-not-allowed')
 
   // 查询串不影响动作解析。
-  const query = callRoute(handler, 'POST', '/dsh-session-hub/raise?x=1')
+  const query = callRoute(handler, 'POST', `${ROUTE_PATH}/raise?x=1`)
   assert.equal(query.status, 200)
 
   // 诊断回调抛异常也不能把路由打挂。
   const captured = callRoute(createRouteHandler(raiser, () => { throw new Error('诊断炸了') }),
-    'POST', '/dsh-session-hub/debug')
+    'POST', `${ROUTE_PATH}/debug`)
   assert.match(captured.body.error, /diagnostics failed/)
 })
 

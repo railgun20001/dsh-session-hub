@@ -1,6 +1,6 @@
-# dsh-session-hub —— 会话状态中心（状态栏 / Windows 通知 / 任务栏状态点）
+# dsh-session-status-hub —— 会话状态中心（状态栏 / Windows 通知 / 任务栏状态点）
 
-[![CI](https://github.com/railgun20001/dsh-session-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/railgun20001/dsh-session-hub/actions/workflows/ci.yml)
+[![CI](https://github.com/railgun20001/dsh-session-status-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/railgun20001/dsh-session-status-hub/actions/workflows/ci.yml)
 [English](README.md) · **简体中文**
 
 给 DeepSeek Harness 补一个「所有对话现在怎么样了」的统一视图：
@@ -96,7 +96,7 @@
 
 - 「窗口在不在前台」由 `document.visibilityState === "visible"` 且 `document.hasFocus()`
   判定（`requireVisibleForFocus` 控制前者），一次观察只判定一次，状态栏 / 通知 / 记账同源；
-- 记账落盘在 `localStorage` 的 `dsh-session-hub/local-unread-v1`（`{ [sessionId]: seq }`），
+- 记账落盘在 `localStorage` 的 `dsh-session-status-hub/local-unread-v1`（`{ [sessionId]: seq }`），
   刷新页面后绿点仍在；
 - 熄灭条件：窗口回到前台且**正在看这个会话**，或用户点了它的通知 / 状态栏 chip
   （`openSession` 即视为已查看）。窗口焦点变化会主动触发一次观察，不用等下一次会话推送；
@@ -199,7 +199,7 @@ Windows 的 toast 对 `tag` 长度有硬限制，**超了会让整条通知在 C
 | 不带 tag | `show`，Windows 有 2416 |
 | `ab-x`（4 字符） | `show`，Windows 有 2416 |
 | `abcdefghij123456`（16 字符） | `show`，Windows 有 2416 |
-| `dsh-session-hub:session-82ed72ce-…#completed:1345`（63 字符） | 无 `show`、无 `failed`、Windows 无 2416 |
+| `dsh-session-status-hub:<会话 id>#completed:<seq>`（示意，远超 16 字符） | 无 `show`、无 `failed`、Windows 无 2416 |
 
 所以 tag 只放哈希（15 字符，低于实验安全上限 16），可读身份记在诊断日志的 `key` 字段里。
 去重不依赖 tag：同一事件只弹一次由 `claimEvent` + 水位负责。
@@ -210,7 +210,7 @@ Windows 的 toast 对 `tag` 长度有硬限制，**超了会让整条通知在 C
 ### 诊断日志
 
 通知到底有没有落到系统上，看客户端半的落地日志（`localStorage` 的
-`dsh-session-hub/notify-log-v1`，保留最近 20 条）：
+`dsh-session-status-hub/notify-log-v1`，保留最近 20 条）：
 
 | `stage` | 含义 |
 |---|---|
@@ -233,7 +233,7 @@ Electron 的 `BrowserWindow.setOverlayIcon` 没有暴露给渲染进程，preloa
 
 ```
 渲染进程                          宿主半（Electron 主进程的子进程）
-  │ POST dsh-session-hub/taskbar          │
+  │ POST dsh-session-status-hub/taskbar          │
   │ {state: red|yellow|green|none}        │
   └──────────────────────────────────────▶│  createWindowRaiser.overlay()
                                           │  ├─ EnumWindows(ppid) 找主窗口 HWND
@@ -262,7 +262,7 @@ Electron 的 `BrowserWindow.setOverlayIcon` 没有暴露给渲染进程，preloa
 ## 5. 架构
 
 ```
-plugins/dsh-session-hub/
+plugins/dsh-session-status-hub/
 ├── index.js                 宿主半：hubTurnOutcome 投影 + 路由（ping/debug/raise/warmup/taskbar）
 ├── lib/
 │   ├── raise-window.js      宿主半：窗口前置 + 任务栏状态点（PowerShell worker）
@@ -281,7 +281,7 @@ plugins/dsh-session-hub/
 │   ├── hub-slots.js         三处插槽注册
 │   └── client-main.js       接线：服务 → 模型 → 通知 / 状态栏 / 任务栏
 ├── build/bundle.mjs         把 src/ 下的源文件按顺序内联成单文件浏览器 bundle（--check 校验）
-├── test/                    135 个用例（node:test，零依赖）
+├── test/                    138 个用例（node:test，零依赖）
 ├── locale/{zh,en}.json      插件管理器的标题与描述
 ├── icon.svg                 插件图标
 ├── cordis.patch.yml         bundle patch：插入 session-hub 行
@@ -311,8 +311,8 @@ plugins/dsh-session-hub/
 
 ## 6. 安装
 
-> 命名说明：**npm 包名是 `dsh-session-status-hub`**（`dsh-session-hub` 在 npm 上已被别的插件占用），
-> 仓库名与插件内部 id 仍是 `dsh-session-hub`。下文凡涉及包名一律用 npm 名，涉及本地目录用仓库名。
+> 命名说明：仓库名、npm 包名、插件内部 id（路由前缀 / localStorage 键 / 日志标签）统一为
+> `dsh-session-status-hub`。0.1.x 曾用 `dsh-session-status-hub`，升级时旧存储键会自动搬过来。
 
 **方式一：npm**
 
@@ -323,12 +323,12 @@ npm install dsh-session-status-hub
 **方式二：从源码装**。把仓库克隆（或下载解压）到本机任意目录：
 
 ```powershell
-git clone https://github.com/railgun20001/dsh-session-hub.git
+git clone https://github.com/railgun20001/dsh-session-status-hub.git
 ```
 
 然后二选一：
 
-- 用 DSH 的「插件」页 → 添加本地插件 → 选择 `dsh-session-hub` 目录；
+- 用 DSH 的「插件」页 → 添加本地插件 → 选择 `dsh-session-status-hub` 目录；
 - 用插件管理器（如果所在会话提供 `plugin_manager` 工具）→ `install_bundle` → 目标指向该目录。
 
 安装后：
@@ -336,14 +336,14 @@ git clone https://github.com/railgun20001/dsh-session-hub.git
 - **宿主半**（`index.js`）由 HMR 在 profile 组合变化时加载，无需重启；
 - **客户端半**（`lib/client.js`）需要刷新页面：在 DSH 窗口按 `Ctrl+R`，或完全重启 DSH。
 
-**卸载**：插件管理器移除 `dsh-session-hub` bundle，再刷新页面；宿主半卸载时会自动
+**卸载**：插件管理器移除 `dsh-session-status-hub` bundle，再刷新页面；宿主半卸载时会自动
 清掉任务栏状态点。
 
 ---
 
 ## 7. 配置
 
-配置在 `localStorage` 的 `dsh-session-hub/config-v1`，默认值已经覆盖「不打扰」：
+配置在 `localStorage` 的 `dsh-session-status-hub/config-v1`，默认值已经覆盖「不打扰」：
 
 插件在同一前缀下还落了几份运行状态（排障、迁移或清理数据时需要知道它们的存在）：
 
@@ -387,8 +387,8 @@ __DSH_SESSION_HUB__.setConfig({ silenceAllWhenFocused: true })
 ## 8. 诊断与验证
 
 ```powershell
-cd path/to/dsh-session-hub
-npm run check      # 1) 校验 lib/client.js 与源码一致  2) 跑 135 个用例
+cd path/to/dsh-session-status-hub
+npm run check      # 1) 校验 lib/client.js 与源码一致  2) 跑 138 个用例
 ```
 
 DSH 窗口 DevTools 控制台：
@@ -421,9 +421,9 @@ __DSH_SESSION_HUB__.pingHost()         // 'present' / 'absent' / 'unknown'
 # 源（协议 + 主机 + 端口）跟着当前 DSH 实例走：页面是什么源，路由就在那个源上。
 # 例如 Web 端在浏览器里打开 http://127.0.0.1:8779/ ，就用这个源；桌面端由 shell 同源转发。
 $base = 'http://127.0.0.1:8779'
-$h = @{ 'x-dsh-session-hub' = '1' }   # 内部路由要求签名头，缺了会 403
-Invoke-RestMethod -Uri "$base/dsh-session-hub/ping"  -Method POST -Headers $h
-Invoke-RestMethod -Uri "$base/dsh-session-hub/debug" -Method POST -Headers $h
+$h = @{ 'x-dsh-session-status-hub' = '1' }   # 内部路由要求签名头，缺了会 403
+Invoke-RestMethod -Uri "$base/dsh-session-status-hub/ping"  -Method POST -Headers $h
+Invoke-RestMethod -Uri "$base/dsh-session-status-hub/debug" -Method POST -Headers $h
 # 注意：签名头只用来挡跨站触发，不是鉴权（见第 11 节）；桌面端页面内的 fetch 是同源通路。
 ```
 
@@ -448,7 +448,7 @@ Invoke-RestMethod -Uri "$base/dsh-session-hub/debug" -Method POST -Headers $h
 ## 9. 已知边界
 
 - **宿主半的窗口状态修复需要重启一次 DSH**：`lib/raise-window.js` 的 worker 脚本在宿主
-  启动时加载，旧进程里仍是旧协议。`POST /dsh-session-hub/ping` 返回的 `workerProtocol`
+  启动时加载，旧进程里仍是旧协议。`POST /dsh-session-status-hub/ping` 返回的 `workerProtocol`
   为 `2` 才表示运行中的 worker 已保留最大化；客户端 chip 点击的修复不需要重启，刷新页面即可。
 - **窗口前置依赖 Windows 前台锁**：`AttachThreadInput` 组合在本机实测有效，但全屏应用、
   UAC 提权窗口、远程桌面切换等极端场景仍可能拒绝；此时应用内跳转照常发生。
@@ -475,23 +475,26 @@ Invoke-RestMethod -Uri "$base/dsh-session-hub/debug" -Method POST -Headers $h
 
 - **零 npm 依赖**：宿主半只用 `node:child_process` / `node:fs`；客户端半只用浏览器 API、
   React（由客户端模块表提供）与 DSH 服务。
-- **命名**：npm 包名 `dsh-session-status-hub`（重名所迫），`cordis.patch.yml` 的 `name` 与
-  `window.__ModuleLoader__` 的注册 id 都取包名；而 `PLUGIN_ID`（路由前缀、localStorage 键、
-  日志标签）刻意保持 `dsh-session-hub` 不变——改它会让已存的配置与补记作废，收益为零。
+- **命名**：仓库名、npm 包名、`cordis.patch.yml` 的 `name`、`window.__ModuleLoader__` 的注册 id、
+  `PLUGIN_ID`（路由前缀 / localStorage 键 / 日志标签）统一为 `dsh-session-status-hub`；
+  只有 Cordis 的节点 id（`cordis.patch.yml` 的 `id`）保持短名 `session-hub`，它只在 profile 树
+  内部使用，不出现在任何对外命名里。
+- **从 0.1.x 升级**：插件 id 变了，localStorage 键前缀随之变化；客户端半启动时会把旧前缀下的
+  配置 / 报错确认 / 补记搬一次（新键已有数据则不覆盖），搬完删掉旧键。
 - **宿主半会起一个 PowerShell 进程**（窗口前置 + 任务栏点），可用 `raiseWindow: false`
   关闭窗口前置（任务栏点仍需要 worker）；worker 空闲 10 分钟退出，状态点亮着时保持。
-- **宿主半挂内部路由**：`POST /dsh-session-hub/{ping,debug,warmup,raise,taskbar}`。
+- **宿主半挂内部路由**：`POST /dsh-session-status-hub/{ping,debug,warmup,raise,taskbar}`。
   同源，且只接受 POST + 签名头（见第 11 节）；只做「提窗口 / 画状态点 / 只读诊断」，
   不读任何用户数据。
 
 ## 11. 安全与隐私
 
-- **没有任何外发网络请求**：插件只跟本机宿主半（`dsh-session-hub/*` 同源路由）通信，
+- **没有任何外发网络请求**：插件只跟本机宿主半（`dsh-session-status-hub/*` 同源路由）通信，
   没有遥测、没有统计、不访问第三方接口。
 - **数据只落本机**：配置、水位、报错确认、补记的「待查看」与通知落地日志全部存在浏览器
-  `localStorage`（键前缀 `dsh-session-hub/`）；会话投影的检查点由 DSH 自己的投影注册表
+  `localStorage`（键前缀 `dsh-session-status-hub/`）；会话投影的检查点由 DSH 自己的投影注册表
   落盘。插件不读会话正文，只读「最后一个回合的结局」与几个状态布尔值。
-- **内部路由要求签名头**：客户端每条请求都带 `x-dsh-session-hub: 1`，宿主半见到才处理
+- **内部路由要求签名头**：客户端每条请求都带 `x-dsh-session-status-hub: 1`，宿主半见到才处理
   （缺头直接 403）。这**不是鉴权**，而是用来挡「跨站触发」：自定义头会把浏览器请求升级成
   需要预检的跨站请求，而宿主半不返回任何 CORS 响应头，于是别的网页即使能 POST 到本机端口
   也到不了 handler——`/raise`（把窗口弹到前台）与 `/warmup`（拉起 PowerShell worker）

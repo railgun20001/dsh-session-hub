@@ -10,7 +10,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { createJsonStore } from '../src/hub-json-store.js'
-import { createHubStores, createSnapshotStore } from '../src/hub-stores.js'
+import { createHubStores, createSnapshotStore, migrateLegacyKeys } from '../src/hub-stores.js'
 import { normalizeConfig } from '../src/notify-core.js'
 import { normalizeSeqMap } from '../src/hub-model.js'
 
@@ -26,6 +26,7 @@ function memoryStorage(initial = {}) {
     data,
     getItem: (key) => (data.has(key) ? data.get(key) : null),
     setItem: (key, value) => { data.set(key, value) },
+    removeItem: (key) => { data.delete(key) },
   }
 }
 
@@ -166,4 +167,42 @@ test('快照仓库只在引用变化时通知订阅者', () => {
   dispose()
   store.set({ a: 3 })
   assert.equal(calls, 1, '退订后不再收到通知')
+})
+
+test('旧前缀迁移：旧键有数据、新键为空时搬过去并删旧键', () => {
+  const storage = memoryStorage({
+    'dsh-session-hub/config-v1': { silenceAllWhenFocused: true },
+    'dsh-session-hub/local-unread-v1': { s1: 12 },
+  })
+  const store = createJsonStore({ pluginId: 'dsh-session-status-hub', storage, warn: () => {} })
+  const moved = migrateLegacyKeys({
+    store,
+    keys: KEYS,
+    legacyKeys: { config: 'dsh-session-hub/config-v1', watermarks: 'dsh-session-hub/watermarks-v1', ack: 'dsh-session-hub/error-acks-v1', unread: 'dsh-session-hub/local-unread-v1' },
+  })
+  assert.deepEqual(moved.sort(), ['config', 'unread'])
+  assert.deepEqual(JSON.parse(storage.getItem(KEYS.config)), { silenceAllWhenFocused: true })
+  assert.deepEqual(JSON.parse(storage.getItem(KEYS.unread)), { s1: 12 })
+  assert.equal(storage.getItem('dsh-session-hub/config-v1'), null, '旧键应被删掉')
+  assert.equal(storage.getItem('dsh-session-hub/local-unread-v1'), null)
+})
+
+test('旧前缀迁移：新键已有数据时不覆盖，旧键也不删', () => {
+  const storage = memoryStorage({
+    [KEYS.config]: { silenceAllWhenFocused: false },
+    'dsh-session-hub/config-v1': { silenceAllWhenFocused: true },
+  })
+  const store = createJsonStore({ pluginId: 'dsh-session-status-hub', storage, warn: () => {} })
+  const moved = migrateLegacyKeys({ store, keys: KEYS, legacyKeys: { config: 'dsh-session-hub/config-v1' } })
+  assert.deepEqual(moved, [])
+  assert.deepEqual(JSON.parse(storage.getItem(KEYS.config)), { silenceAllWhenFocused: false })
+  assert.notEqual(storage.getItem('dsh-session-hub/config-v1'), null, '有新数据时不应动旧键')
+})
+
+test('旧前缀迁移：没有旧数据、或新旧前缀相同时什么都不做', () => {
+  const storage = memoryStorage()
+  const store = createJsonStore({ pluginId: 'dsh-session-status-hub', storage, warn: () => {} })
+  assert.deepEqual(migrateLegacyKeys({ store, keys: KEYS, legacyKeys: {} }), [])
+  assert.deepEqual(migrateLegacyKeys({ store, keys: KEYS, legacyKeys: { ...KEYS } }), [])
+  assert.deepEqual(migrateLegacyKeys({ store, keys: KEYS, legacyKeys: null }), [])
 })

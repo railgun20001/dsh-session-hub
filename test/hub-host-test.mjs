@@ -1,5 +1,5 @@
 /**
- * dsh-session-hub —— 宿主半桥接单测（src/hub-host.js）
+ * dsh-session-status-hub —— 宿主半桥接单测（src/hub-host.js）
  *
  * 三个关注点：任务栏状态去重、`raiseWindow` 开关、以及「宿主半在线状态」的四态判定与退避。
  * 探活的措辞是排障的入口（用户拿日志来问「为什么通知没弹」时全靠它），所以这里连文案一起断言。
@@ -38,10 +38,10 @@ function harness(options = {}) {
     desktop: options.desktop ?? true,
     disposed: false,
     config: { raiseWindow: true },
-    onFetch: options.onFetch ?? (() => ({ ok: true, status: 200, json: () => Promise.resolve({ host: 'dsh-session-hub', version: '0.1.0', projectionKey: 'hubTurnOutcome' }) })),
+    onFetch: options.onFetch ?? (() => ({ ok: true, status: 200, json: () => Promise.resolve({ host: 'dsh-session-status-hub', version: '0.1.0', projectionKey: 'hubTurnOutcome' }) })),
   }
   const bridge = createHostBridge({
-    pluginId: 'dsh-session-hub',
+    pluginId: 'dsh-session-status-hub',
     version: '0.1.0',
     getConfig: () => control.config,
     isDesktopShell: () => control.desktop,
@@ -78,7 +78,7 @@ test('任务栏状态：同状态去重，变化才发，force 绕过', () => {
   bridge.pushTaskbar('red')
   bridge.pushTaskbar('red')
   assert.equal(fetches.length, 1)
-  assert.equal(fetches[0].url, 'dsh-session-hub/taskbar')
+  assert.equal(fetches[0].url, 'dsh-session-status-hub/taskbar')
   assert.equal(fetches[0].init.method, 'POST')
   assert.deepEqual(JSON.parse(fetches[0].init.body), { state: 'red' })
   assert.equal(fetches[0].init.headers['content-type'], 'application/json')
@@ -109,7 +109,7 @@ test('raiseWindow 关闭时不再请求前置窗口，但预热照发', () => {
   assert.equal(fetches.length, 0)
   bridge.callHostRoute('warmup')
   assert.equal(fetches.length, 1)
-  assert.equal(fetches[0].url, 'dsh-session-hub/warmup')
+  assert.equal(fetches[0].url, 'dsh-session-status-hub/warmup')
 })
 
 test('探活：host 字段对得上即在线，并打印版本', async () => {
@@ -131,7 +131,7 @@ test('探活：版本不一致时明确说出错位', async () => {
   const infos = []
   const restore = captureConsole('info', (line) => infos.push(line))
   const { bridge } = harness({
-    onFetch: () => ({ ok: true, status: 200, json: () => Promise.resolve({ host: 'dsh-session-hub', version: '9.9.9', projectionKey: 'hubTurnOutcome' }) }),
+    onFetch: () => ({ ok: true, status: 200, json: () => Promise.resolve({ host: 'dsh-session-status-hub', version: '9.9.9', projectionKey: 'hubTurnOutcome' }) }),
   })
   try {
     bridge.checkHostHalf(true)

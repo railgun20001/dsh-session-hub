@@ -23,6 +23,7 @@
  * @returns {{
  *   read: (key: string, fallback: unknown) => unknown,
  *   write: (key: string, value: unknown) => void,
+ *   remove: (key: string) => void,
  * }} 读写器。
  */
 export function createJsonStore(options = {}) {
@@ -66,5 +67,19 @@ export function createJsonStore(options = {}) {
     }
   }
 
-  return { read, write }
+  /**
+   * 删掉一个键（迁移旧前缀时用）。存储后端不支持删除、或删除失败，都只当没发生。
+   * @param {string} key 存储键。
+   * @returns {void}
+   */
+  const remove = (key) => {
+    try {
+      if (storage === null) return
+      storage.removeItem?.(key)
+    } catch (error) {
+      warn(`[${pluginId}] 删除 ${key} 失败`, error)
+    }
+  }
+
+  return { read, write, remove }
 }

@@ -57,6 +57,36 @@ export function createSnapshotStore(initial) {
 }
 
 /**
+ * 把旧前缀下的持久状态搬到新前缀（插件改名时用，一次性）。
+ *
+ * 规则：
+ *   - 只搬「新键还没有数据、旧键有数据」的那些项；新键已有数据一律不覆盖（用户已经在用新键了）；
+ *   - 搬完删掉旧键，避免下次重复搬；
+ *   - 全程只读写 localStorage，不做任何归一化——搬过去的原样继续走各自的归一化入口。
+ *
+ * @param {object} options 迁移输入。
+ * @param {{ read: Function, write: Function, remove: Function }} options.store JSON 读写器。
+ * @param {Record<string, string>} options.keys 新键集合。
+ * @param {Record<string, string>} options.legacyKeys 旧键集合（与 `keys` 同名）。
+ * @returns {string[]} 真正搬迁过的状态名（用于日志）。
+ */
+export function migrateLegacyKeys({ store, keys, legacyKeys }) {
+  const moved = []
+  if (legacyKeys === null || typeof legacyKeys !== 'object') return moved
+  for (const [name, target] of Object.entries(keys)) {
+    const source = legacyKeys[name]
+    if (typeof source !== 'string' || source === '' || source === target) continue
+    if (store.read(target, undefined) !== undefined) continue
+    const legacy = store.read(source, undefined)
+    if (legacy === undefined) continue
+    store.write(target, legacy)
+    store.remove?.(source)
+    moved.push(name)
+  }
+  return moved
+}
+
+/**
  * 创建四份持久状态。
  *
  * @param {object} options 依赖注入。

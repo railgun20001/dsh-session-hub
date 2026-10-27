@@ -142,7 +142,7 @@ async function createHarness(boot = {}) {
   globalThis.fetch = (url, options) => {
     state.fetches.push({ url, options })
     if (typeof boot.onFetch === 'function') return boot.onFetch(url, options, state)
-    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ host: 'dsh-session-hub', projectionKey: 'hubTurnOutcome' }) })
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ host: 'dsh-session-status-hub', projectionKey: 'hubTurnOutcome' }) })
   }
 
   // 每个 harness 用不同的 URL 查询串，避免 ESM 模块缓存复用同一个 bundle 实例。
@@ -331,7 +331,7 @@ test('探活回报的宿主半版本与客户端半不一致时，会明确说�
     onFetch: () => Promise.resolve({
       ok: true,
       status: 200,
-      json: () => Promise.resolve({ host: 'dsh-session-hub', version: '9.9.9', projectionKey: 'hubTurnOutcome' }),
+      json: () => Promise.resolve({ host: 'dsh-session-status-hub', version: '9.9.9', projectionKey: 'hubTurnOutcome' }),
     }),
   })
   try {
@@ -392,12 +392,12 @@ test('新一轮完成弹「任务完成」，点通知跳回会话并把窗口�
     assert.deepEqual(harness.state.openedSessions, [])
     // uiWorkspace 未注册时走 DOM 事件退路。
     assert.equal(harness.state.dispatched.length, 1)
-    assert.equal(harness.state.dispatched[0].type, 'dsh-session-hub:open-session')
+    assert.equal(harness.state.dispatched[0].type, 'dsh-session-status-hub:open-session')
     assert.equal(harness.state.dispatched[0].detail.sessionId, 's1')
     // 并且请求宿主半把窗口提到前台（渲染进程自己做不到）。
     assert.deepEqual(
       harness.state.fetches.map((call) => call.url),
-      ['dsh-session-hub/warmup', 'dsh-session-hub/raise'],
+      ['dsh-session-status-hub/warmup', 'dsh-session-status-hub/raise'],
     )
     assert.equal(harness.state.fetches[1].options.method, 'POST')
   } finally {
@@ -447,7 +447,7 @@ test('通知落地结果写进诊断日志：onshow 记 shown', async () => {
     assert.equal(log[0].sessionId, 's1')
     assert.match(log[0].tag, /^dsh[0-9a-f]{12}$/)
     // 可读身份不丢，只是挪到 `key` 里：排障时仍能看出是哪条事件。
-    assert.equal(log[0].key, 'dsh-session-hub:s1#completed:12')
+    assert.equal(log[0].key, 'dsh-session-status-hub:s1#completed:12')
     assert.equal(log[0].permission, 'granted')
 
     // 清空后重新读回空表（排障入口要能复位）。
@@ -676,14 +676,14 @@ test('读不到投影值只代表「还没有回合结局」，探活到宿主�
     onFetch: () => Promise.resolve({
       ok: true,
       status: 200,
-      json: () => Promise.resolve({ host: 'dsh-session-hub', projectionKey: 'hubTurnOutcome' }),
+      json: () => Promise.resolve({ host: 'dsh-session-status-hub', projectionKey: 'hubTurnOutcome' }),
     }),
   })
   try {
     await settle()
     assert.deepEqual(
       harness.state.fetches.map((call) => call.url),
-      ['dsh-session-hub/ping'],
+      ['dsh-session-status-hub/ping'],
       '值缺失时应当探活一次',
     )
     assert.equal(globalThis.__DSH_SESSION_HUB__.inspect().hostHalf, 'present')
@@ -777,7 +777,7 @@ test('探活具备退避：5 分钟内不重复请求', async () => {
     await settle()
     harness.setRow('s1', { running: false })
     await settle()
-    const pings = harness.state.fetches.filter((call) => call.url === 'dsh-session-hub/ping')
+    const pings = harness.state.fetches.filter((call) => call.url === 'dsh-session-status-hub/ping')
     assert.equal(pings.length, 1, '失败后 5 分钟内不再打扰宿主')
   } finally {
     harness.dispose()
@@ -864,12 +864,12 @@ test('当前会话在窗口被别的应用盖住时完成：弹完成通知，�
     assert.equal(api.getTaskbarState(), 'green')
 
     // 3) 宿主半真的收到了绿灯请求（任务栏图标上的绿点）。
-    const taskbar = harness.state.fetches.filter((call) => call.url === 'dsh-session-hub/taskbar')
+    const taskbar = harness.state.fetches.filter((call) => call.url === 'dsh-session-status-hub/taskbar')
     assert.ok(taskbar.length > 0, '桌面端应当向宿主半上报任务栏状态')
     assert.deepEqual(JSON.parse(taskbar.at(-1).options.body), { state: 'green' })
 
     // 4) 记账落盘：刷新页面（新客户端半）后绿点仍然在。
-    assert.deepEqual(JSON.parse(harness.state.storage.get('dsh-session-hub/local-unread-v1')), { s1: 12 })
+    assert.deepEqual(JSON.parse(harness.state.storage.get('dsh-session-status-hub/local-unread-v1')), { s1: 12 })
   } finally {
     harness.dispose()
     harness.restore()
@@ -898,7 +898,7 @@ test('窗口回到前台且正在看该会话后，「待查看」记账与任�
     assert.deepEqual(api.getLocalUnread(), {})
     assert.equal(api.getTaskbarState(), 'none')
     assert.deepEqual(api.getRows(), [])
-    const taskbar = harness.state.fetches.filter((call) => call.url === 'dsh-session-hub/taskbar')
+    const taskbar = harness.state.fetches.filter((call) => call.url === 'dsh-session-status-hub/taskbar')
     assert.deepEqual(JSON.parse(taskbar.at(-1).options.body), { state: 'none' })
   } finally {
     harness.dispose()
@@ -1076,7 +1076,7 @@ test('窗口已聚焦时点通知不再重复请求前置窗口（不会触碰�
     harness.state.notifications[0].onclick()
     assert.deepEqual(
       harness.state.fetches.map((call) => call.url),
-      ['dsh-session-hub/warmup'],
+      ['dsh-session-status-hub/warmup'],
     )
   } finally {
     harness.dispose()

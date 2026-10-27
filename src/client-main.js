@@ -128,6 +128,11 @@ function isDesktopShell() {
 function apply(ctx) {
   const keys = hubStorageKeys(PLUGIN_ID)
   const store = createJsonStore({ pluginId: PLUGIN_ID })
+  // 0.1.x 的键前缀是旧插件 id：搬一次，别让升级把配置、报错确认与「后台完成」记账弄丢。
+  const migrated = migrateLegacyKeys({ store, keys, legacyKeys: hubStorageKeys(LEGACY_PLUGIN_ID) })
+  if (migrated.length > 0) {
+    ctx.logger?.info?.(`[${PLUGIN_ID}] 已把旧前缀（${LEGACY_PLUGIN_ID}）的状态迁移到新键：${migrated.join(', ')}`)
+  }
   const stores = createHubStores({
     store,
     keys,
